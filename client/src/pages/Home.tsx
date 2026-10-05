@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpRight, Bell, Cable, CheckCircle2, CircleStop, CloudSun, Cpu, HardDrive, Play, Radio, RefreshCw, ShieldCheck, SlidersHorizontal, Sun, Terminal, X, Zap } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, Bell, Cable, CheckCircle2, CircleStop, CloudSun, Cpu, HardDrive, Play, Radio, RefreshCw, ShieldCheck, SlidersHorizontal, Sun, Terminal, Usb, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { type Frame, normalize, demoFrame } from "@/lib/telemetry";
@@ -34,6 +34,10 @@ export default function Home() {
   const [hasMatlabData, setHasMatlabData] = useState(false);
 
   const [espConnected, setEspConnected] = useState(false);
+  const [webSerialConnected, setWebSerialConnected] = useState(false);
+  const [webSerialPort, setWebSerialPort] = useState<any>(null);
+  const webSerialReaderRef = useRef<any>(null);
+
   const [sourcePreference, setSourcePreference] = useState<"AUTO" | "MATLAB" | "ESP32" | "DEMO">("AUTO");
   const [stopped, setStopped] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -41,6 +45,75 @@ export default function Home() {
   const matlabSocketRef = useRef<WebSocket | null>(null);
   const espSocketRef = useRef<WebSocket | null>(null);
   const snapshot = snapshotQuery.data;
+
+  // -------------------------------------------------------------
+  // WebSerial USB Serial Port Handler
+  // -------------------------------------------------------------
+  const connectWebSerial = async () => {
+    if (!("serial" in navigator)) {
+      toast.error("WebSerial is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+      return;
+    }
+    try {
+      const port = await (navigator as any).serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      setWebSerialPort(port);
+      setWebSerialConnected(true);
+      toast.success("ESP32 USB Serial port connected at 115200 baud!");
+
+      const textDecoder = new TextDecoderStream();
+      const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+      const reader = textDecoder.readable.getReader();
+      webSerialReaderRef.current = reader;
+
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          reader.releaseLock();
+          break;
+        }
+        buffer += value;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (typeof parsed.v_pv === "number" && typeof parsed.i_pv === "number") {
+                const frame = normalize(parsed);
+                setTelemetry((prev) => [...prev.slice(-59), frame]);
+                ingestMutation.mutate({ deviceKey: "array-a", ...parsed, timestampMs: frame.timestampMs });
+              }
+            } catch (err) {
+              console.warn("[WebSerial] Frame parse error:", err);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== "NotFoundError") {
+        toast.error(`WebSerial connection error: ${err.message || err}`);
+      }
+      setWebSerialConnected(false);
+    }
+  };
+
+  const disconnectWebSerial = async () => {
+    try {
+      if (webSerialReaderRef.current) {
+        await webSerialReaderRef.current.cancel();
+      }
+      if (webSerialPort) {
+        await webSerialPort.close();
+      }
+    } catch {}
+    setWebSerialPort(null);
+    setWebSerialConnected(false);
+    toast.info("ESP32 USB Serial disconnected");
+  };
 
   // -------------------------------------------------------------
   // 1. Direct WebSocket connection to /ws/matlab
@@ -123,26 +196,43 @@ export default function Home() {
     // Secondary continuous polling sync (ensures 100% seamless update even if WS blips)
     const pollInterval = setInterval(async () => {
       try {
-        const res = await fetch("/api/telemetry/matlab/latest");
-        if (res.ok) {
-          const json = await res.json();
-          if (json.ok && json.telemetry) {
-            const frame = normalize(json.telemetry);
-            setTelemetry((prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.timestampMs !== frame.timestampMs) {
-                return [...prev.slice(-59), frame];
-              }
-              return prev;
-            });
-            setMatlabFrames((prev) => {
-              const last = prev[prev.length - 1];
-              if (!last || last.timestampMs !== frame.timestampMs) {
-                return [...prev.slice(-59), frame];
-              }
-              return prev;
-            });
-            setHasMatlabData(true);
+        if (sourcePreference === "ESP32") {
+          const res = await fetch("/api/telemetry/esp32/latest");
+          if (res.ok) {
+            const json = await res.json();
+            if (json.ok && json.telemetry) {
+              const frame = normalize(json.telemetry);
+              setTelemetry((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.timestampMs !== frame.timestampMs) {
+                  return [...prev.slice(-59), frame];
+                }
+                return prev;
+              });
+            }
+          }
+        } else {
+          const res = await fetch("/api/telemetry/matlab/latest");
+          if (res.ok) {
+            const json = await res.json();
+            if (json.ok && json.telemetry) {
+              const frame = normalize(json.telemetry);
+              setTelemetry((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.timestampMs !== frame.timestampMs) {
+                  return [...prev.slice(-59), frame];
+                }
+                return prev;
+              });
+              setMatlabFrames((prev) => {
+                const last = prev[prev.length - 1];
+                if (!last || last.timestampMs !== frame.timestampMs) {
+                  return [...prev.slice(-59), frame];
+                }
+                return prev;
+              });
+              setHasMatlabData(true);
+            }
           }
         }
       } catch {}
@@ -156,7 +246,7 @@ export default function Home() {
         matlabSocketRef.current.close();
       }
     };
-  }, []);
+  }, [sourcePreference]);
 
   // -------------------------------------------------------------
   // 2. Initialize from database snapshot
@@ -179,12 +269,13 @@ export default function Home() {
   // -------------------------------------------------------------
   // 3. Standby & Derived States (No demo data interval)
   // -------------------------------------------------------------
-  const connection = useMemo<"LIVE" | "MATLAB LIVE" | "MATLAB SIMULATION" | "STANDBY" | "CONNECTING" | "DISCONNECTED" | "ERROR">(() => {
+  const connection = useMemo<"ESP32 USB LIVE" | "LIVE" | "MATLAB LIVE" | "MATLAB SIMULATION" | "STANDBY" | "CONNECTING" | "DISCONNECTED" | "ERROR">(() => {
+    if (webSerialConnected) return "ESP32 USB LIVE";
     if (espConnected) return "LIVE";
     if (hasMatlabData) return "MATLAB LIVE";
     if (matlabWsConnected) return "CONNECTING";
     return "STANDBY";
-  }, [espConnected, hasMatlabData, matlabWsConnected]);
+  }, [webSerialConnected, espConnected, hasMatlabData, matlabWsConnected]);
 
   const defaultStandbyFrame: Frame = {
     timestampMs: Date.now(),
@@ -204,6 +295,9 @@ export default function Home() {
   const trend = useMemo(() => telemetry.slice(-14).map((item) => item.pPv), [telemetry]);
 
   const notice = useMemo(() => {
+    if (webSerialConnected) {
+      return `ESP32 USB Link active · Streaming live synthetic MPPT telemetry @ 115200 baud · P=${current.pPv.toFixed(2)} W · V=${current.vPv.toFixed(2)} V · D=${(current.duty * 100).toFixed(1)}%`;
+    }
     if (connection === "LIVE") {
       return "ESP32 hardware link established";
     }
@@ -213,8 +307,8 @@ export default function Home() {
     if (matlabWsConnected) {
       return "WebSocket connected to /ws/matlab · Ready for MATLAB LIVE stream";
     }
-    return "System ready · Run start_live_matlab_stream in MATLAB to stream live";
-  }, [connection, current.pPv, current.vPv, current.duty, matlabSampleCount, matlabWsConnected]);
+    return "System ready · Connect ESP32 via USB or run start_live_matlab_stream in MATLAB";
+  }, [webSerialConnected, connection, current.pPv, current.vPv, current.duty, matlabSampleCount, matlabWsConnected]);
 
   // -------------------------------------------------------------
   // 5. ESP32 hardware connection handler
@@ -282,7 +376,7 @@ export default function Home() {
         <div>
           <div className="eyebrow">ARRAY A · MPPT TELEMETRY</div>
           <h1>MPPT Dashboard</h1>
-          <p>Real-time telemetry, Simulink EKF model integration, and hardware tracking.</p>
+          <p>Real-time telemetry, Simulink EKF model integration, and ESP32 hardware tracking.</p>
         </div>
         <div className="heading-actions">
           <div className="segmented" style={{ display: "flex", gap: "4px", background: "rgba(10,24,34,0.6)", padding: "4px", borderRadius: "8px", border: "1px solid rgba(127,194,218,0.15)" }}>
@@ -308,8 +402,17 @@ export default function Home() {
             <span className="status-dot" />
             {connection}
           </span>
+          {webSerialConnected ? (
+            <button className="button danger" onClick={disconnectWebSerial} title="Disconnect ESP32 USB Serial">
+              <Usb size={14} /> Disconnect USB
+            </button>
+          ) : (
+            <button className="button primary" onClick={connectWebSerial} title="Connect ESP32 via USB Serial (WebSerial)">
+              <Usb size={14} /> Connect ESP32 (USB)
+            </button>
+          )}
           <button className="button subtle" onClick={connectEsp32} title="Connect ESP32 WebSocket">
-            <Cable size={14} /> ESP32 Link
+            <Cable size={14} /> ESP32 WS
           </button>
           <button className="button icon" aria-label="Refresh" onClick={() => snapshotQuery.refetch()}>
             <RefreshCw size={15} />

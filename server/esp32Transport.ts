@@ -84,6 +84,9 @@ esp32Wss.on("connection", (socket, req) => {
         latestEspFrame = frame;
         lastSeenMs = Date.now();
 
+        // Broadcast frame to all listening WebSocket clients
+        broadcastEsp32Frame(frame);
+
         const device = await ensureDevice("array-a");
         await insertTelemetry({
           deviceId: device.id,
@@ -114,6 +117,19 @@ esp32Wss.on("connection", (socket, req) => {
   });
 });
 
+export function broadcastEsp32Frame(frame: Esp32Frame) {
+  const message = JSON.stringify(frame);
+  espClients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(message);
+      } catch (err) {
+        console.warn("[ESP32 WS] Frame broadcast error:", err);
+      }
+    }
+  });
+}
+
 export function registerEsp32Transport(app: Express, _server?: HttpServer) {
   app.get("/api/esp32/status", (_req, res) => {
     res.json({
@@ -122,6 +138,10 @@ export function registerEsp32Transport(app: Express, _server?: HttpServer) {
       lastSeenMs,
       latest: latestEspFrame,
     });
+  });
+
+  app.get("/api/telemetry/esp32/latest", (_req, res) => {
+    res.json({ ok: true, telemetry: latestEspFrame });
   });
 
   app.post("/api/telemetry/esp32", async (req: Request, res: Response) => {
@@ -150,6 +170,8 @@ export function registerEsp32Transport(app: Express, _server?: HttpServer) {
         };
         latestEspFrame = frame;
         lastSeenMs = Date.now();
+
+        broadcastEsp32Frame(frame);
 
         await insertTelemetry({
           deviceId: device.id,
