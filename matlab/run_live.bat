@@ -1,0 +1,3 @@
+@echo off
+echo Starting MATLAB Live MPPT Simulation...
+"C:\Program Files\MATLAB\R2026a\bin\matlab.exe" -nosplash -sd "c:\Users\saisi\.antigravity-ide\renewable_energy_technology_dashboard\matlab" -r "setup_live_simulink_bridge(); open('Zero_Perturb_MPPT_Live.slx'); sim('Zero_Perturb_MPPT_Live');"

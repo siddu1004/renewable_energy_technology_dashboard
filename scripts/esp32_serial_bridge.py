@@ -56,9 +56,32 @@ def main():
             if not line:
                 continue
             
+            payload = None
             if line.startswith("{") and line.endswith("}"):
                 try:
                     payload = json.loads(line)
+                except Exception as json_err:
+                    print(f"JSON decode warning: {json_err}")
+            elif "V_op:" in line:
+                import re
+                try:
+                    v_match = re.search(r"V_op:\s*([0-9.]+)", line)
+                    i_match = re.search(r"I_op:\s*([0-9.]+)", line)
+                    p_match = re.search(r"P:\s*([0-9.]+)", line)
+                    d_match = re.search(r"Duty:\s*([0-9.]+)", line)
+                    t_match = re.search(r"Temp:\s*([0-9.]+)", line)
+                    if v_match and i_match:
+                        v = float(v_match.group(1))
+                        i = float(i_match.group(1))
+                        p = float(p_match.group(1)) if p_match else v * i
+                        d = int(d_match.group(1)) if d_match else 512
+                        t = float(t_match.group(1)) if t_match else 25.0
+                        payload = {"v_pv": v, "i_pv": i, "p_pv": p, "duty": d, "t_c": t, "timestampMs": int(time.time() * 1000)}
+                except Exception as regex_err:
+                    pass
+
+            if payload:
+                try:
                     data = json.dumps(payload).encode('utf-8')
                     req = urllib.request.Request(
                         SERVER_URL,
@@ -72,7 +95,7 @@ def main():
                 except Exception as post_err:
                     print(f"Error posting frame: {post_err}")
             else:
-                print(f"[ESP32 raw]: {line}")
+                print(f"[ESP32 message]: {line}")
 
         except KeyboardInterrupt:
             print("\nBridge stopped by user.")

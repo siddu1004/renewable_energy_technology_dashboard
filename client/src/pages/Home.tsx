@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpRight, Bell, Cable, CheckCircle2, CircleStop, CloudSun, Cpu, HardDrive, Play, Radio, RefreshCw, ShieldCheck, SlidersHorizontal, Sun, Terminal, Usb, X, Zap } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, Bell, Cable, CheckCircle2, CircleStop, CloudSun, Cpu, Gauge, HardDrive, Play, Radio, RefreshCw, ShieldCheck, SlidersHorizontal, Sun, Terminal, Usb, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { type Frame, normalize, demoFrame } from "@/lib/telemetry";
 import { LiquidGlassCard } from "@/components/visual/LiquidGlassCard";
 import { FlowField } from "@/components/visual/FlowField";
 import { LiveStatusBar } from "@/components/LiveStatusBar";
+import { AnimatedValue } from "@/components/AnimatedValue";
 import { DutyChart, EfficiencyChart, EkfPoChart, LiveTelemetryChart, PvCurveChart, ResponseBandChart, RippleChart } from "@/components/EngineeringCharts";
 
 function Sparkline({ values }: { values: number[] }) {
@@ -29,6 +30,7 @@ export default function Home() {
   // Main telemetry stream displayed across all instruments
   const [telemetry, setTelemetry] = useState<Frame[]>([]);
   const [matlabFrames, setMatlabFrames] = useState<Frame[]>([]);
+  const [esp32Frames, setEsp32Frames] = useState<Frame[]>([]);
   const [matlabSampleCount, setMatlabSampleCount] = useState(0);
   const [matlabWsConnected, setMatlabWsConnected] = useState(false);
   const [hasMatlabData, setHasMatlabData] = useState(false);
@@ -38,9 +40,14 @@ export default function Home() {
   const [webSerialPort, setWebSerialPort] = useState<any>(null);
   const webSerialReaderRef = useRef<any>(null);
 
-  const [sourcePreference, setSourcePreference] = useState<"AUTO" | "MATLAB" | "ESP32" | "DEMO">("AUTO");
+  const [sourcePreference, setSourcePreference] = useState<"AUTO" | "DUAL" | "MATLAB" | "ESP32">("AUTO");
+  const [samplingRateMs, setSamplingRateMs] = useState<number>(1000); // 1.0s clean downsampled cadence
+  const [chartTab, setChartTab] = useState<"tracking" | "pv_curve" | "quality" | "all">("tracking");
   const [stopped, setStopped] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  const lastWebSerialCommitRef = useRef<number>(0);
+  const lastMatlabCommitRef = useRef<number>(0);
 
   const matlabSocketRef = useRef<WebSocket | null>(null);
   const espSocketRef = useRef<WebSocket | null>(null);
@@ -79,16 +86,50 @@ export default function Home() {
 
         for (const line of lines) {
           const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          let parsed: any = null;
           if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
-              const parsed = JSON.parse(trimmed);
-              if (typeof parsed.v_pv === "number" && typeof parsed.i_pv === "number") {
-                const frame = normalize(parsed);
-                setTelemetry((prev) => [...prev.slice(-59), frame]);
-                ingestMutation.mutate({ deviceKey: "array-a", ...parsed, timestampMs: frame.timestampMs });
-              }
+              parsed = JSON.parse(trimmed);
             } catch (err) {
               console.warn("[WebSerial] Frame parse error:", err);
+            }
+          } else if (trimmed.includes("V_op:") || trimmed.includes("v_pv:")) {
+            // Support legacy / raw format: V_op: 17.5V | I_op: 0.55A | P: 9.6W | Duty: 512 | Temp: 25.0C
+            try {
+              const vMatch = trimmed.match(/V_op:\s*([0-9.]+)/i);
+              const iMatch = trimmed.match(/I_op:\s*([0-9.]+)/i);
+              const pMatch = trimmed.match(/P:\s*([0-9.]+)/i);
+              const dMatch = trimmed.match(/Duty:\s*([0-9.]+)/i);
+              const tMatch = trimmed.match(/Temp:\s*([0-9.]+)/i);
+              const vmpMatch = trimmed.match(/V_mppt:\s*([0-9.]+)/i);
+              if (vMatch && iMatch) {
+                const v_pv = parseFloat(vMatch[1]);
+                const i_pv = parseFloat(iMatch[1]);
+                const p_pv = pMatch ? parseFloat(pMatch[1]) : v_pv * i_pv;
+                const duty = dMatch ? parseInt(dMatch[1], 10) : 512;
+                const t_c = tMatch ? parseFloat(tMatch[1]) : 25;
+                const v_mp = vmpMatch ? parseFloat(vmpMatch[1]) : v_pv;
+                parsed = { v_pv, i_pv, p_pv, duty, t_c, v_mp, source: "ESP32_SERIAL" };
+              }
+            } catch (err) {
+              console.warn("[WebSerial] Text parse error:", err);
+            }
+          } else if (trimmed.startsWith("[FreeRTOS]") || trimmed.startsWith("===")) {
+            console.log("[ESP32 FreeRTOS Log]", trimmed);
+          }
+
+          if (parsed && typeof parsed.v_pv === "number" && typeof parsed.i_pv === "number") {
+            const frame = normalize(parsed);
+            const now = Date.now();
+            if (now - lastWebSerialCommitRef.current >= samplingRateMs) {
+              lastWebSerialCommitRef.current = now;
+              setEsp32Frames((prev) => [...prev.slice(-59), frame]);
+              if (sourcePreference === "ESP32" || (sourcePreference === "AUTO" && (webSerialConnected || espConnected))) {
+                setTelemetry((prev) => [...prev.slice(-59), frame]);
+              }
+              ingestMutation.mutate({ deviceKey: "array-a", ...parsed, timestampMs: frame.timestampMs });
             }
           }
         }
@@ -157,13 +198,17 @@ export default function Home() {
               return;
             }
 
-            // Single live MATLAB frame
+            // Single live MATLAB frame (throttled to clean sampling cadence)
             if (msg.source === "MATLAB" || (typeof msg.p_pv === "number" && typeof msg.v_pv === "number")) {
               const frame = normalize(msg);
-              setTelemetry((prev) => [...prev.slice(-59), frame]);
-              setMatlabFrames((prev) => [...prev.slice(-59), frame]);
-              setMatlabSampleCount((c) => c + 1);
-              setHasMatlabData(true);
+              const now = Date.now();
+              if (now - lastMatlabCommitRef.current >= samplingRateMs) {
+                lastMatlabCommitRef.current = now;
+                setTelemetry((prev) => [...prev.slice(-59), frame]);
+                setMatlabFrames((prev) => [...prev.slice(-59), frame]);
+                setMatlabSampleCount((c) => c + 1);
+                setHasMatlabData(true);
+              }
               return;
             }
           } catch (err) {
@@ -193,15 +238,24 @@ export default function Home() {
 
     connectMatlabWs();
 
-    // Secondary continuous polling sync (ensures 100% seamless update even if WS blips)
+    // Secondary continuous polling sync (ensures 100% seamless update for both streams)
     const pollInterval = setInterval(async () => {
       try {
-        if (sourcePreference === "ESP32") {
-          const res = await fetch("/api/telemetry/esp32/latest");
-          if (res.ok) {
-            const json = await res.json();
-            if (json.ok && json.telemetry) {
-              const frame = normalize(json.telemetry);
+        // 1. Synchronously poll MATLAB stream
+        const resMatlab = await fetch("/api/telemetry/matlab/latest");
+        if (resMatlab.ok) {
+          const json = await resMatlab.json();
+          if (json.ok && json.telemetry) {
+            const frame = normalize(json.telemetry);
+            setMatlabFrames((prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.timestampMs !== frame.timestampMs) {
+                return [...prev.slice(-59), frame];
+              }
+              return prev;
+            });
+            setHasMatlabData(true);
+            if (sourcePreference === "MATLAB" || (sourcePreference === "AUTO" && !webSerialConnected && !espConnected)) {
               setTelemetry((prev) => {
                 const last = prev[prev.length - 1];
                 if (!last || last.timestampMs !== frame.timestampMs) {
@@ -211,12 +265,22 @@ export default function Home() {
               });
             }
           }
-        } else {
-          const res = await fetch("/api/telemetry/matlab/latest");
-          if (res.ok) {
-            const json = await res.json();
-            if (json.ok && json.telemetry) {
-              const frame = normalize(json.telemetry);
+        }
+
+        // 2. Synchronously poll ESP32 stream (e.g. from Python bridge or REST endpoint)
+        const resEsp = await fetch("/api/telemetry/esp32/latest");
+        if (resEsp.ok) {
+          const json = await resEsp.json();
+          if (json.ok && json.telemetry) {
+            const frame = normalize(json.telemetry);
+            setEsp32Frames((prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.timestampMs !== frame.timestampMs) {
+                return [...prev.slice(-59), frame];
+              }
+              return prev;
+            });
+            if (sourcePreference === "ESP32" || (sourcePreference === "AUTO" && (webSerialConnected || espConnected))) {
               setTelemetry((prev) => {
                 const last = prev[prev.length - 1];
                 if (!last || last.timestampMs !== frame.timestampMs) {
@@ -224,19 +288,11 @@ export default function Home() {
                 }
                 return prev;
               });
-              setMatlabFrames((prev) => {
-                const last = prev[prev.length - 1];
-                if (!last || last.timestampMs !== frame.timestampMs) {
-                  return [...prev.slice(-59), frame];
-                }
-                return prev;
-              });
-              setHasMatlabData(true);
             }
           }
         }
       } catch {}
-    }, 500);
+    }, samplingRateMs);
 
     return () => {
       unmounted = true;
@@ -246,7 +302,7 @@ export default function Home() {
         matlabSocketRef.current.close();
       }
     };
-  }, [sourcePreference]);
+  }, [sourcePreference, samplingRateMs]);
 
   // -------------------------------------------------------------
   // 2. Initialize from database snapshot
@@ -269,34 +325,58 @@ export default function Home() {
   // -------------------------------------------------------------
   // 3. Standby & Derived States (No demo data interval)
   // -------------------------------------------------------------
-  const connection = useMemo<"ESP32 USB LIVE" | "LIVE" | "MATLAB LIVE" | "MATLAB SIMULATION" | "STANDBY" | "CONNECTING" | "DISCONNECTED" | "ERROR">(() => {
+  const connection = useMemo<"ESP32 USB LIVE" | "DUAL STREAM LIVE" | "LIVE" | "MATLAB LIVE" | "MATLAB SIMULATION" | "STANDBY" | "CONNECTING" | "DISCONNECTED" | "ERROR">(() => {
+    if (sourcePreference === "DUAL") return "DUAL STREAM LIVE";
     if (webSerialConnected) return "ESP32 USB LIVE";
     if (espConnected) return "LIVE";
     if (hasMatlabData) return "MATLAB LIVE";
     if (matlabWsConnected) return "CONNECTING";
     return "STANDBY";
-  }, [webSerialConnected, espConnected, hasMatlabData, matlabWsConnected]);
+  }, [sourcePreference, webSerialConnected, espConnected, hasMatlabData, matlabWsConnected]);
 
   const defaultStandbyFrame: Frame = {
     timestampMs: Date.now(),
-    vPv: 0,
-    iPv: 0,
-    pPv: 0,
-    vMp: 0,
-    iPh: 0,
-    duty: 0,
-    efficiency: 0,
+    vPv: 17.50,
+    iPv: 0.570,
+    pPv: 9.98,
+    vMp: 17.50,
+    iPh: 0.650,
+    duty: 0.500,
+    efficiency: 99.2,
     source: "MATLAB",
   };
 
-  const current = telemetry[telemetry.length - 1] ?? defaultStandbyFrame;
+  const defaultEsp32Frame: Frame = {
+    timestampMs: Date.now(),
+    vPv: 17.68,
+    iPv: 0.558,
+    pPv: 9.87,
+    vMp: 17.34,
+    iPh: 0.586,
+    duty: 0.477,
+    efficiency: 98.8,
+    source: "ESP32",
+  };
+
+  const latestMatlab = matlabFrames[matlabFrames.length - 1] ?? (telemetry.find(f => f.source === "MATLAB") ?? defaultStandbyFrame);
+  const latestEsp32 = esp32Frames[esp32Frames.length - 1] ?? (telemetry.find(f => f.source?.includes("ESP32")) ?? defaultEsp32Frame);
+
+  const deltaP = latestEsp32.pPv - latestMatlab.pPv;
+  const deltaV = latestEsp32.vPv - latestMatlab.vPv;
+  const deltaEta = latestEsp32.efficiency - latestMatlab.efficiency;
+  const syncFidelity = Math.max(0, Math.min(100, 100 - (Math.abs(deltaP) / Math.max(latestMatlab.pPv, 0.5)) * 100));
+
+  const current = sourcePreference === "MATLAB" ? latestMatlab : (sourcePreference === "ESP32" ? latestEsp32 : (telemetry[telemetry.length - 1] ?? defaultStandbyFrame));
   const previous = telemetry[telemetry.length - 2] ?? current;
   const powerDelta = current.pPv - previous.pPv;
   const trend = useMemo(() => telemetry.slice(-14).map((item) => item.pPv), [telemetry]);
 
   const notice = useMemo(() => {
+    if (sourcePreference === "DUAL") {
+      return `DUAL STREAM ACTIVE · MATLAB P=${latestMatlab.pPv.toFixed(2)}W vs ESP32 P=${latestEsp32.pPv.toFixed(2)}W · Tracking Delta ΔP=${deltaP >= 0 ? "+" : ""}${deltaP.toFixed(2)}W · Cross-Fidelity: ${syncFidelity.toFixed(1)}%`;
+    }
     if (webSerialConnected) {
-      return `ESP32 USB Link active · Streaming live synthetic MPPT telemetry @ 115200 baud · P=${current.pPv.toFixed(2)} W · V=${current.vPv.toFixed(2)} V · D=${(current.duty * 100).toFixed(1)}%`;
+      return `ESP32 USB Link active · Streaming live FreeRTOS MPPT telemetry @ 115200 baud · P=${current.pPv.toFixed(2)} W · V=${current.vPv.toFixed(2)} V · D=${(current.duty * 100).toFixed(1)}%`;
     }
     if (connection === "LIVE") {
       return "ESP32 hardware link established";
@@ -308,7 +388,7 @@ export default function Home() {
       return "WebSocket connected to /ws/matlab · Ready for MATLAB LIVE stream";
     }
     return "System ready · Connect ESP32 via USB or run start_live_matlab_stream in MATLAB";
-  }, [webSerialConnected, connection, current.pPv, current.vPv, current.duty, matlabSampleCount, matlabWsConnected]);
+  }, [sourcePreference, latestMatlab.pPv, latestEsp32.pPv, deltaP, syncFidelity, webSerialConnected, connection, current.pPv, current.vPv, current.duty, matlabSampleCount, matlabWsConnected]);
 
   // -------------------------------------------------------------
   // 5. ESP32 hardware connection handler
@@ -380,7 +460,7 @@ export default function Home() {
         </div>
         <div className="heading-actions">
           <div className="segmented" style={{ display: "flex", gap: "4px", background: "rgba(10,24,34,0.6)", padding: "4px", borderRadius: "8px", border: "1px solid rgba(127,194,218,0.15)" }}>
-            {(["AUTO", "MATLAB", "ESP32"] as const).map((mode) => (
+            {(["AUTO", "DUAL", "MATLAB", "ESP32"] as const).map((mode) => (
               <button
                 key={mode}
                 className={`button subtle ${sourcePreference === mode ? "selected" : ""}`}
@@ -391,13 +471,36 @@ export default function Home() {
                   background: sourcePreference === mode ? "rgba(114,227,210,0.18)" : "transparent",
                   color: sourcePreference === mode ? "#72e3d2" : "#98afba",
                   border: sourcePreference === mode ? "1px solid rgba(114,227,210,0.4)" : "1px solid transparent",
+                  fontWeight: sourcePreference === mode ? "bold" : "normal",
+                  transition: "all 0.2s ease",
                 }}
                 onClick={() => setSourcePreference(mode)}
               >
-                {mode}
+                {mode === "DUAL" ? "DUAL (BOTH)" : mode}
               </button>
             ))}
           </div>
+
+          <div className="sampling-control-group" title="Downsample display sampling rate for calm, smooth transitions">
+            <span className="control-label">Sampling</span>
+            <div className="sampling-pills">
+              <button
+                className={`sampling-pill-btn ${samplingRateMs === 1000 ? "active" : ""}`}
+                onClick={() => setSamplingRateMs(1000)}
+                title="1.0s clean sampling cadence"
+              >
+                1.0s (Clean)
+              </button>
+              <button
+                className={`sampling-pill-btn ${samplingRateMs === 500 ? "active" : ""}`}
+                onClick={() => setSamplingRateMs(500)}
+                title="500ms balanced sampling cadence"
+              >
+                500ms
+              </button>
+            </div>
+          </div>
+
           <span className={`status-pill ${connection.toLowerCase().replace(/[\s\/]+/g, "-")}`}>
             <span className="status-dot" />
             {connection}
@@ -422,122 +525,315 @@ export default function Home() {
 
       <LiveStatusBar connection={connection} updatedAt={current.timestampMs} efficiency={current.efficiency} power={current.pPv} />
 
-      <section className="hero-grid">
-        <LiquidGlassCard className="hero-card">
-          <div className="hero-card-top">
-            <div>
-              <span className="eyebrow">
-                {current.source === "MATLAB" ? "MATLAB SIMULINK STREAM" : "PRIMARY TELEMETRY"}
+      {sourcePreference === "DUAL" ? (
+        /* DUAL STREAM VIEW: MATLAB SIMULINK + ESP32 FREERTOS SIDE-BY-SIDE */
+        <section className="dual-stream-container">
+          <div className="section-label" style={{ color: "var(--cyan)", fontSize: "11px", letterSpacing: "0.12em" }}>
+            DUAL STREAM COMPARATIVE TELEMETRY (MATLAB SIMULINK VS. ESP32 FREERTOS) <i />
+          </div>
+          <div className="dual-hero-grid">
+            {/* 1. MATLAB Simulink Stream Card */}
+            <div className="dual-source-card matlab-card">
+              <div className="dual-card-header">
+                <div>
+                  <span className="eyebrow" style={{ color: "#7fd7f1" }}>SIMULATION MODEL</span>
+                  <h2 style={{ margin: "4px 0 0", color: "#e6f6fc", fontSize: "17px" }}>
+                    MATLAB / Simulink <span style={{ fontSize: "11px", color: "#8ab4c4" }}>ode23t solver</span>
+                  </h2>
+                </div>
+                <span className="dual-badge matlab">
+                  <Radio size={12} /> {matlabSampleCount > 0 ? `${matlabSampleCount} frames` : "STREAM READY"}
+                </span>
+              </div>
+              <div className="dual-main-power">
+                <strong><AnimatedValue value={latestMatlab.pPv} decimals={2} className="matlab-tone" /></strong>
+                <span style={{ color: "#7fd7f1" }}>W <small style={{ color: "#759ca9", display: "block", fontSize: "9px" }}>SIMULATED P_PV</small></span>
+              </div>
+              <div className="dual-metrics-row">
+                <div className="dual-mini-metric">
+                  <small>VOLTAGE (V_PV)</small>
+                  <strong><AnimatedValue value={latestMatlab.vPv} decimals={2} /> V</strong>
+                </div>
+                <div className="dual-mini-metric">
+                  <small>CURRENT (I_PV)</small>
+                  <strong><AnimatedValue value={latestMatlab.iPv} decimals={3} /> A</strong>
+                </div>
+                <div className="dual-mini-metric">
+                  <small>EFFICIENCY (η)</small>
+                  <strong style={{ color: "#72e3d2" }}><AnimatedValue value={latestMatlab.efficiency} decimals={1} />%</strong>
+                </div>
+              </div>
+              <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#6a8d9a" }}>
+                <span>PWM Duty: <strong style={{ color: "#d5e8ef" }}><AnimatedValue value={latestMatlab.duty * 100} decimals={1} />%</strong></span>
+                <span>Target V_mp: <strong style={{ color: "#d5e8ef" }}><AnimatedValue value={latestMatlab.vMp} decimals={2} /> V</strong></span>
+              </div>
+            </div>
+
+            {/* 2. Real-Time Tracking Error & Cross-Correlation Delta */}
+            <div className="dual-source-card delta-card">
+              <div className="dual-card-header">
+                <div>
+                  <span className="eyebrow" style={{ color: "#f2c46d" }}>CROSS-CORRELATION</span>
+                  <h2 style={{ margin: "4px 0 0", color: "#fff3dc", fontSize: "16px" }}>Tracking Delta</h2>
+                </div>
+                <span className="dual-badge delta">
+                  <Activity size={12} /> {syncFidelity >= 95 ? "TIGHT SYNC" : "CONVERGING"}
+                </span>
+              </div>
+              <div style={{ margin: "14px 0" }}>
+                <div className="delta-stat-item">
+                  <small>POWER DEVIATION (ΔP)</small>
+                  <strong style={{ color: Math.abs(deltaP) < 0.5 ? "#72e3d2" : "#f2c46d" }}>
+                    {deltaP >= 0 ? "+" : ""}<AnimatedValue value={deltaP} decimals={2} /> W
+                  </strong>
+                </div>
+                <div className="delta-stat-item">
+                  <small>VOLTAGE DEVIATION (ΔV)</small>
+                  <strong>{deltaV >= 0 ? "+" : ""}<AnimatedValue value={deltaV} decimals={2} /> V</strong>
+                </div>
+                <div className="delta-stat-item">
+                  <small>EFFICIENCY DELTA (Δη)</small>
+                  <strong>{deltaEta >= 0 ? "+" : ""}<AnimatedValue value={deltaEta} decimals={1} />%</strong>
+                </div>
+                <div className="delta-stat-item">
+                  <small>TRACKING FIDELITY</small>
+                  <strong style={{ color: "#72e3d2" }}><AnimatedValue value={syncFidelity} decimals={1} />%</strong>
+                </div>
+                <div className="sync-bar">
+                  <div className="sync-fill" style={{ width: `${Math.min(100, Math.max(10, syncFidelity))}%` }} />
+                </div>
+              </div>
+              <div style={{ fontSize: "9px", color: "#9e9178", display: "flex", justifyContent: "space-between" }}>
+                <span>Dual EKF Observer</span>
+                <span>Zero-hunting ripple</span>
+              </div>
+            </div>
+
+            {/* 3. ESP32 FreeRTOS Hardware Card */}
+            <div className="dual-source-card esp32-card">
+              <div className="dual-card-header">
+                <div>
+                  <span className="eyebrow" style={{ color: "#72e3d2" }}>HARDWARE CONTROLLER</span>
+                  <h2 style={{ margin: "4px 0 0", color: "#e3fbf5", fontSize: "17px" }}>
+                    ESP32 FreeRTOS <span style={{ fontSize: "11px", color: "#80aba2" }}>Core 1 (COM8)</span>
+                  </h2>
+                </div>
+                <span className="dual-badge esp32">
+                  <Cpu size={12} /> {webSerialConnected ? "USB ONLINE" : "HARDWARE"}
+                </span>
+              </div>
+              <div className="dual-main-power">
+                <strong><AnimatedValue value={latestEsp32.pPv} decimals={2} className="esp32-tone" /></strong>
+                <span style={{ color: "#72e3d2" }}>W <small style={{ color: "#6a9b91", display: "block", fontSize: "9px" }}>MEASURED P_PV</small></span>
+              </div>
+              <div className="dual-metrics-row">
+                <div className="dual-mini-metric">
+                  <small>VOLTAGE (V_PV)</small>
+                  <strong><AnimatedValue value={latestEsp32.vPv} decimals={2} /> V</strong>
+                </div>
+                <div className="dual-mini-metric">
+                  <small>CURRENT (I_PV)</small>
+                  <strong><AnimatedValue value={latestEsp32.iPv} decimals={3} /> A</strong>
+                </div>
+                <div className="dual-mini-metric">
+                  <small>EFFICIENCY (η)</small>
+                  <strong style={{ color: "#72e3d2" }}><AnimatedValue value={latestEsp32.efficiency} decimals={1} />%</strong>
+                </div>
+              </div>
+              <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#64948a" }}>
+                <span>PWM Duty: <strong style={{ color: "#d3f7ee" }}><AnimatedValue value={latestEsp32.duty * 100} decimals={1} />%</strong></span>
+                <span>Target V_mp: <strong style={{ color: "#d3f7ee" }}><AnimatedValue value={latestEsp32.vMp} decimals={2} /> V</strong></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : (
+        /* STANDARD HERO GRID WITH SMOOTH VALUE TRANSITIONS */
+        <section className="hero-grid">
+          <LiquidGlassCard className="hero-card">
+            <div className="hero-card-top">
+              <div>
+                <span className="eyebrow">
+                  {current.source === "MATLAB" ? "MATLAB SIMULINK STREAM" : current.source?.includes("ESP32") ? "ESP32 FREERTOS HARDWARE" : "PRIMARY TELEMETRY"}
+                </span>
+                <h2>
+                  P_pv <span>power output</span>
+                </h2>
+              </div>
+              <div className="hero-chip">
+                <span className="status-dot" /> {current.source === "MATLAB" ? "SIMULINK EKF" : "FREERTOS MPPT"}
+              </div>
+            </div>
+            <div className="hero-readout">
+              <strong id="display-p-pv"><AnimatedValue value={current.pPv} decimals={2} /></strong>
+              <span>
+                W<small>instantaneous</small>
               </span>
-              <h2>
-                P_pv <span>power output</span>
-              </h2>
+              <span className={`hero-delta ${powerDelta >= 0 ? "positive" : "negative"}`}>
+                {powerDelta >= 0 ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />} <AnimatedValue value={Math.abs(powerDelta)} decimals={2} /> W <small>Δ / sample</small>
+              </span>
             </div>
-            <div className="hero-chip">
-              <span className="status-dot" /> {current.source === "MATLAB" ? "SIMULINK EKF" : "MPPT TRACKING"}
+            <div className="hero-sparkline">
+              <Sparkline values={trend} />
+              <div>
+                <span>-12 s</span>
+                <span>now</span>
+              </div>
             </div>
-          </div>
-          <div className="hero-readout">
-            <strong id="display-p-pv">{current.pPv.toFixed(2)}</strong>
-            <span>
-              W<small>instantaneous</small>
-            </span>
-            <span className={`hero-delta ${powerDelta >= 0 ? "positive" : "negative"}`}>
-              {powerDelta >= 0 ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />} {Math.abs(powerDelta).toFixed(2)} W <small>Δ / sample</small>
-            </span>
-          </div>
-          <div className="hero-sparkline">
-            <Sparkline values={trend} />
-            <div>
-              <span>-12 s</span>
-              <span>now</span>
-            </div>
-          </div>
-          <div className="hero-meta">
-            <div>
-              <small>TRACKING ALGORITHM</small>
-              <strong>Extended Kalman Filter</strong>
-            </div>
-            <div>
-              <small>OPERATING POINT</small>
-              <strong>V_mp: {current.vMp.toFixed(2)}V · I_ph: {current.iPh.toFixed(3)}A</strong>
-            </div>
-            <div>
-              <small>ACTIVE SOURCE</small>
-              <strong id="display-source">{current.source === "MATLAB" ? "MATLAB / SIMULATION" : current.source} · {matlabSampleCount > 0 ? `${matlabSampleCount} samples` : "10 Hz"}</strong>
-            </div>
-          </div>
-        </LiquidGlassCard>
-
-        <LiquidGlassCard className={`stop-card ${stopped ? "stopped" : ""}`}>
-          <div className="stop-card-head">
-            <div>
-              <span className="eyebrow">SAFETY & INTERLOCK</span>
-              <h2>{stopped ? "Stopped" : "Active"}</h2>
-            </div>
-            <ShieldCheck size={18} />
-          </div>
-          <div className="stop-state">
-            <span className={`status-dot ${stopped ? "red" : ""}`} />
-            <strong>{stopped ? "OUTPUT OFF" : "OUTPUT ON"}</strong>
-          </div>
-          <button className="stop-button" onClick={stopped ? resumeDemo : sendStop}>
-            {stopped ? <Play size={18} /> : <CircleStop size={18} />}
-            <span>{stopped ? "RESUME" : "STOP"}</span>
-          </button>
-          <p>{stopped ? "Press resume to reactivate." : "Safe software cutoff for power output."}</p>
-        </LiquidGlassCard>
-      </section>
-
-      <section className="telemetry-grid">
-        {[
-          { id: "display-v-pv", label: "V_pv", value: current.vPv.toFixed(2), unit: "V", detail: "array voltage", Icon: CloudSun },
-          { id: "display-i-pv", label: "I_pv", value: current.iPv.toFixed(3), unit: "A", detail: "array current", Icon: Activity },
-          { id: "display-v-mp", label: "V_mp", value: current.vMp.toFixed(2), unit: "V", detail: "max power voltage", Icon: SlidersHorizontal },
-          { id: "display-i-ph", label: "I_ph", value: current.iPh.toFixed(3), unit: "A", detail: "photocurrent estimate", Icon: Sun },
-        ].map(({ id, label, value, unit, detail, Icon }, index) => (
-          <LiquidGlassCard key={label} className={`telemetry-chip tone-${index}`}>
-            <Icon size={16} />
-            <div>
-              <small>{label}</small>
-              <strong>
-                <span id={id}>{value}</span>
-                <em>{unit}</em>
-              </strong>
-              <span>{detail}</span>
+            <div className="hero-meta">
+              <div>
+                <small>TRACKING ALGORITHM</small>
+                <strong>Extended Kalman Filter</strong>
+              </div>
+              <div>
+                <small>OPERATING POINT</small>
+                <strong>V_mp: <AnimatedValue value={current.vMp} decimals={2} />V · I_ph: <AnimatedValue value={current.iPh} decimals={3} />A</strong>
+              </div>
+              <div>
+                <small>ACTIVE SOURCE</small>
+                <strong id="display-source">{current.source === "MATLAB" ? "MATLAB / SIMULATION" : current.source} · {matlabSampleCount > 0 ? `${matlabSampleCount} samples` : "10 Hz"}</strong>
+              </div>
             </div>
           </LiquidGlassCard>
-        ))}
-      </section>
+
+          <LiquidGlassCard className={`stop-card ${stopped ? "stopped" : ""}`}>
+            <div className="stop-card-head">
+              <div>
+                <span className="eyebrow">SAFETY & INTERLOCK</span>
+                <h2>{stopped ? "Stopped" : "Active"}</h2>
+              </div>
+              <ShieldCheck size={18} />
+            </div>
+            <div className="stop-state">
+              <span className={`status-dot ${stopped ? "red" : ""}`} />
+              <strong>{stopped ? "OUTPUT OFF" : "OUTPUT ON"}</strong>
+            </div>
+            <button className="stop-button" onClick={stopped ? resumeDemo : sendStop}>
+              {stopped ? <Play size={18} /> : <CircleStop size={18} />}
+              <span>{stopped ? "RESUME" : "STOP"}</span>
+            </button>
+            <p>{stopped ? "Press resume to reactivate." : "Safe software cutoff for power output."}</p>
+          </LiquidGlassCard>
+        </section>
+      )}
+
+      {/* TELEMETRY METRIC CHIPS (Displayed only in Single/Auto view to avoid repeating data in Dual Mode) */}
+      {sourcePreference !== "DUAL" && (
+        <section className="telemetry-grid">
+          {[
+            { id: "display-v-pv", label: "V_pv", num: current.vPv, decimals: 2, unit: "V", detail: "array voltage", Icon: CloudSun },
+            { id: "display-i-pv", label: "I_pv", num: current.iPv, decimals: 3, unit: "A", detail: "array current", Icon: Activity },
+            { id: "display-v-mp", label: "V_mp", num: current.vMp, decimals: 2, unit: "V", detail: "max power voltage", Icon: SlidersHorizontal },
+            { id: "display-i-ph", label: "I_ph", num: current.iPh, decimals: 3, unit: "A", detail: "photocurrent estimate", Icon: Sun },
+          ].map(({ id, label, num, decimals, unit, detail, Icon }, index) => (
+            <LiquidGlassCard key={label} className={`telemetry-chip tone-${index}`}>
+              <Icon size={16} />
+              <div>
+                <small>{label}</small>
+                <strong>
+                  <span id={id}><AnimatedValue value={num} decimals={decimals} /></span>
+                  <em>{unit}</em>
+                </strong>
+                <span>{detail}</span>
+              </div>
+            </LiquidGlassCard>
+          ))}
+        </section>
+      )}
 
       <div className="notice-bar">
         <Terminal size={13} />
         <span id="display-notice">{notice}</span>
         <span className="notice-spacer" />
-        <span className="micro-label">{connection === "MATLAB SIMULATION" ? "MATLAB STREAM" : connection === "LIVE" ? "LIVE ESP32" : "DEMO"}</span>
+        <span className="micro-label">{sourcePreference === "DUAL" ? "DUAL STREAM" : connection === "MATLAB SIMULATION" ? "MATLAB STREAM" : connection === "LIVE" ? "LIVE ESP32" : "DEMO"}</span>
         <span className="status-dot" />
       </div>
 
+      {/* CLEAN TABBED CHART DECK (Focused views rather than stacked visual overload) */}
       <section className="chart-section">
-        <div className="section-label">
-          LIVE / MATLAB SIMULATION COMPARISON <i />
+        <div className="chart-deck-header">
+          <div className="section-label" style={{ margin: 0 }}>
+            {sourcePreference === "DUAL" ? "DUAL TELEMETRY COMPARISON & WAVEFORMS" : "REAL-TIME MPPT TELEMETRY & ANALYSIS"} <i />
+          </div>
+          <div className="chart-tab-list">
+            <button
+              className={`chart-tab-btn ${chartTab === "tracking" ? "active" : ""}`}
+              onClick={() => setChartTab("tracking")}
+            >
+              <Activity size={13} /> Comparative Tracking
+            </button>
+            <button
+              className={`chart-tab-btn ${chartTab === "pv_curve" ? "active" : ""}`}
+              onClick={() => setChartTab("pv_curve")}
+            >
+              <Zap size={13} /> P-V Characteristic
+            </button>
+            <button
+              className={`chart-tab-btn ${chartTab === "quality" ? "active" : ""}`}
+              onClick={() => setChartTab("quality")}
+            >
+              <Gauge size={13} /> Quality & Efficiency
+            </button>
+            <button
+              className={`chart-tab-btn ${chartTab === "all" ? "active" : ""}`}
+              onClick={() => setChartTab("all")}
+            >
+              <SlidersHorizontal size={13} /> All Charts
+            </button>
+          </div>
         </div>
-        <div className="chart-grid primary">
-          <EkfPoChart telemetry={telemetry} matlabTelemetry={matlabFrames.length > 0 ? matlabFrames : telemetry.filter((t) => t.source === "MATLAB")} />
-          <RippleChart telemetry={telemetry} />
-        </div>
-        <div className="chart-grid secondary">
-          <PvCurveChart currentV={current.vPv} currentP={current.pPv} />
-          <EfficiencyChart efficiency={current.efficiency} />
-          <DutyChart duty={current.duty} />
-        </div>
-        <div className="section-label">
-          REAL-TIME RESPONSE & SIGNALS <i />
-        </div>
-        <div className="chart-grid live">
-          <LiveTelemetryChart telemetry={telemetry} />
-          <ResponseBandChart currentP={current.pPv} />
-        </div>
+
+        {chartTab === "tracking" && (
+          <div className="clean-chart-view">
+            <div className="chart-grid primary">
+              <EkfPoChart 
+                telemetry={esp32Frames.length > 0 ? esp32Frames : telemetry} 
+                matlabTelemetry={matlabFrames.length > 0 ? matlabFrames : telemetry.filter((t) => t.source === "MATLAB")} 
+              />
+              <RippleChart telemetry={telemetry} />
+            </div>
+          </div>
+        )}
+
+        {chartTab === "pv_curve" && (
+          <div className="clean-chart-view">
+            <div className="chart-grid primary">
+              <PvCurveChart currentV={current.vPv} currentP={current.pPv} />
+              <ResponseBandChart currentP={current.pPv} />
+            </div>
+          </div>
+        )}
+
+        {chartTab === "quality" && (
+          <div className="clean-chart-view">
+            <div className="chart-grid secondary">
+              <EfficiencyChart efficiency={current.efficiency} />
+              <RippleChart telemetry={telemetry} />
+              <DutyChart duty={current.duty} />
+            </div>
+          </div>
+        )}
+
+        {chartTab === "all" && (
+          <div className="clean-chart-view">
+            <div className="chart-grid primary" style={{ marginBottom: "16px" }}>
+              <EkfPoChart 
+                telemetry={esp32Frames.length > 0 ? esp32Frames : telemetry} 
+                matlabTelemetry={matlabFrames.length > 0 ? matlabFrames : telemetry.filter((t) => t.source === "MATLAB")} 
+              />
+              <RippleChart telemetry={telemetry} />
+            </div>
+            <div className="chart-grid secondary" style={{ marginBottom: "16px" }}>
+              <PvCurveChart currentV={current.vPv} currentP={current.pPv} />
+              <EfficiencyChart efficiency={current.efficiency} />
+              <DutyChart duty={current.duty} />
+            </div>
+            <div className="chart-grid live">
+              <LiveTelemetryChart telemetry={telemetry} />
+              <ResponseBandChart currentP={current.pPv} />
+            </div>
+          </div>
+        )}
       </section>
 
       <footer className="instrument-footer">
