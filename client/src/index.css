@@ -636,4 +636,487 @@ label > span { font-size: var(--type-sm); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ==========================================================================
+   MATHEMATICAL GOLDEN RATIO (φ ≈ 1.618) & FIBONACCI RESPONSIVE ENGINE
+   Harmonic proportions, modular scales, and universal screen fit
+   ========================================================================== */
+
+:root {
+  /* Golden Ratio Constants */
+  --phi: 1.6180339887;
+  --phi-inv: 0.6180339887;
+  --phi-sq: 2.6180339887;
+
+  /* Fibonacci Spacing & Dimension Scale (px) */
+  --fib-1: 1px;
+  --fib-2: 2px;
+  --fib-3: 3px;
+  --fib-5: 5px;
+  --fib-8: 8px;
+  --fib-13: 13px;
+  --fib-21: 21px;
+  --fib-34: 34px;
+  --fib-55: 55px;
+  --fib-89: 89px;
+  --fib-144: 144px;
+  --fib-233: 233px;
+  --fib-377: 377px;
+  --fib-610: 610px;
+  --fib-987: 987px;
+  --fib-1597: 1597px;
+
+  /* Golden Section Modular Typography Scale (Harmonic Progression r = 1.272 ≈ sqrt(φ)) */
+  --font-mono-tech: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-sans-clean: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+
+  --scale-micro: clamp(9px, 0.618vw + 6px, 11px);
+  --scale-xs: clamp(10px, 0.618vw + 7px, 12px);
+  --scale-sm: clamp(11px, 0.618vw + 8px, 13px);
+  --scale-base: clamp(13px, 0.8vw + 9px, 15px);
+  --scale-md: clamp(15px, 1vw + 11px, 18px);
+  --scale-lg: clamp(18px, 1.2vw + 13px, 24px);
+  --scale-xl: clamp(24px, 2vw + 16px, 34px);
+  --scale-hero: clamp(55px, 6.18vw + 21px, 89px); /* Pure Fibonacci: 55px to 89px */
+
+  /* Golden Easing Curves */
+  --ease-phi: cubic-bezier(0.236, 0.618, 0.382, 1);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Global Font & Tabular Numeral Enforcement */
+html, body, button, input, select {
+  font-family: var(--font-mono-tech) !important;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+body {
+  font-size: var(--scale-base);
+  line-height: 1.618; /* Golden Ratio line-height */
+  overflow-x: hidden;
+}
+
+/* Shell Layout with Golden Ratio Proportions */
+.platform-shell {
+  min-height: 100vh;
+  display: flex;
+}
+
+/* Sidebar: Exactly Fibonacci F12 = 233px */
+.side-rail {
+  width: var(--fib-233) !important;
+  min-height: 100vh;
+  padding: var(--fib-21) var(--fib-13) var(--fib-21) !important;
+  transition: transform var(--fib-233)ms var(--ease-phi), left var(--fib-233)ms var(--ease-phi);
+}
+
+.platform-main {
+  width: calc(100% - var(--fib-233)) !important;
+  margin-left: var(--fib-233) !important;
+  min-width: 0;
+  transition: width var(--fib-233)ms var(--ease-phi), margin-left var(--fib-233)ms var(--ease-phi);
+}
+
+/* Page Wrapper with Golden Margins */
+.page-wrap {
+  min-height: calc(100vh - 70px);
+  padding: clamp(var(--fib-21), 2.618vw, var(--fib-55)) clamp(var(--fib-13), 2vw, var(--fib-34)) !important;
+}
+
+/* Maximum Canvas Breadth pegged to Golden Section: 1000 * φ = 1618px */
+.instrument-page, .subpage {
+  max-width: min(100% - var(--fib-21), 1618px) !important;
+  margin: 0 auto;
+}
+
+/* Header & Actions Bar */
+.instrument-heading, .subpage-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--fib-21) !important;
+  margin-bottom: var(--fib-21) !important;
+  flex-wrap: wrap;
+}
+
+.instrument-heading h1, .subpage-heading h1 {
+  font-size: var(--scale-xl) !important;
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+}
+
+.instrument-heading p, .subpage-heading p {
+  font-size: var(--scale-sm) !important;
+  line-height: 1.618;
+  margin-top: var(--fib-8) !important;
+}
+
+.heading-actions, .subpage-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--fib-8) !important;
+  flex-wrap: wrap;
+}
+
+/* Live Status Strip with Fibonacci Rhythm */
+.live-status-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto !important;
+  align-items: center;
+  gap: var(--fib-13) !important;
+  margin: 0 0 var(--fib-21) !important;
+  padding: var(--fib-13) var(--fib-21) !important;
+  border-radius: var(--fib-13) !important;
+}
+
+.live-status-item {
+  gap: var(--fib-8) !important;
+  padding-right: var(--fib-13) !important;
+}
+
+.live-status-item small {
+  font-size: var(--scale-micro) !important;
+  letter-spacing: 0.12em;
+}
+
+.live-status-item strong {
+  font-size: var(--scale-sm) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hero Grid (Golden Section 61.8% to 38.2%) */
+.hero-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.618fr) minmax(300px, 1fr) !important;
+  gap: var(--fib-13) !important;
+}
+
+.hero-card, .stop-card {
+  min-height: clamp(320px, 32vh, 377px) !important; /* 377 = F13 */
+  padding: var(--fib-34) var(--fib-21) var(--fib-21) !important;
+  border-radius: var(--fib-13) !important;
+}
+
+.hero-card h2, .stop-card h2 {
+  font-size: var(--scale-md) !important;
+}
+
+.hero-readout {
+  gap: var(--fib-13) !important;
+  padding: var(--fib-34) 0 var(--fib-21) !important;
+}
+
+.hero-readout > strong {
+  font-size: var(--scale-hero) !important;
+  line-height: 0.9 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-readout > span:not(.hero-delta) {
+  font-size: var(--scale-md) !important;
+}
+
+.hero-meta {
+  gap: var(--fib-21) !important;
+  padding-top: var(--fib-13) !important;
+}
+
+.stop-button {
+  min-height: var(--fib-89) !important; /* 89 = F10 */
+  border-radius: var(--fib-13) !important;
+  font-size: var(--scale-sm) !important;
+  letter-spacing: 0.12em;
+}
+
+/* Dual Stream Grid: Harmonic 1.618 : 1 : 1.618 Progression */
+.dual-stream-container {
+  margin-bottom: var(--fib-21) !important;
+  gap: var(--fib-13) !important;
+}
+
+.dual-hero-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.618fr) minmax(260px, 1fr) minmax(0, 1.618fr) !important;
+  gap: var(--fib-13) !important;
+  align-items: stretch;
+}
+
+.dual-source-card {
+  padding: var(--fib-21) !important;
+  border-radius: var(--fib-13) !important;
+}
+
+.dual-main-power {
+  margin: var(--fib-13) 0 var(--fib-8) !important;
+  gap: var(--fib-8) !important;
+}
+
+.dual-main-power strong {
+  font-size: clamp(38px, 4.2vw, var(--fib-55)) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.dual-metrics-row {
+  gap: var(--fib-8) !important;
+  padding-top: var(--fib-13) !important;
+}
+
+.sync-bar {
+  height: var(--fib-8) !important;
+  border-radius: var(--fib-5) !important;
+  margin-top: var(--fib-8) !important;
+}
+
+/* Telemetry 4-Card Strip with Proportional Sizing */
+.telemetry-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: var(--fib-13) !important;
+  margin-top: var(--fib-13) !important;
+}
+
+.telemetry-chip {
+  min-height: 110px !important;
+  gap: var(--fib-13) !important;
+  padding: var(--fib-13) var(--fib-21) !important;
+  border-radius: var(--fib-13) !important;
+}
+
+.telemetry-chip strong {
+  font-size: var(--scale-lg) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.telemetry-chip span {
+  font-size: var(--scale-xs) !important;
+  margin-top: var(--fib-5) !important;
+}
+
+/* Chart Grids: Golden Ratio Multi-Column Harmony */
+.chart-section {
+  padding-top: var(--fib-34) !important;
+}
+
+.section-label {
+  gap: var(--fib-8) !important;
+  margin-bottom: var(--fib-13) !important;
+  font-size: var(--scale-xs) !important;
+  letter-spacing: 0.14em;
+}
+
+.chart-grid {
+  gap: var(--fib-13) !important;
+}
+
+.chart-grid.primary, .chart-grid.live {
+  grid-template-columns: minmax(0, 1.618fr) minmax(280px, 1fr) !important;
+}
+
+.chart-grid.secondary {
+  grid-template-columns: minmax(0, 1.618fr) minmax(0, 1fr) minmax(0, 1fr) !important;
+}
+
+.chart-card {
+  min-height: clamp(260px, 28vh, 320px) !important;
+  padding: var(--fib-21) !important;
+  border-radius: var(--fib-13) !important;
+}
+
+.chart-visual {
+  height: clamp(144px, 18vh, var(--fib-233)) !important; /* 144 to 233 px */
+  margin-top: var(--fib-13) !important;
+}
+
+.chart-visual.tall {
+  height: clamp(200px, 25vh, 290px) !important;
+}
+
+.chart-card-head h3 {
+  font-size: var(--scale-md) !important;
+}
+
+/* Chart Tab Deck */
+.chart-deck-header {
+  gap: var(--fib-13) !important;
+  margin-bottom: var(--fib-13) !important;
+}
+
+.chart-tab-list {
+  padding: var(--fib-3) !important;
+  gap: var(--fib-5) !important;
+  border-radius: var(--fib-8) !important;
+}
+
+.chart-tab-btn {
+  padding: var(--fib-5) var(--fib-13) !important;
+  font-size: var(--scale-xs) !important;
+  border-radius: var(--fib-5) !important;
+}
+
+/* Button & Pill Formats Aligned to Fibonacci Scale */
+.button {
+  min-height: var(--fib-34) !important; /* 34 = F8 */
+  padding: 0 var(--fib-13) !important;
+  border-radius: var(--fib-8) !important;
+  font-size: var(--scale-xs) !important;
+  letter-spacing: 0.08em;
+}
+
+.button.icon {
+  width: var(--fib-34) !important;
+  padding: 0 !important;
+}
+
+.button.small {
+  min-height: 26px !important; /* 13 * 2 */
+  padding: 0 var(--fib-8) !important;
+  font-size: var(--scale-micro) !important;
+}
+
+.sampling-control-group {
+  padding: var(--fib-3) var(--fib-8) !important;
+  gap: var(--fib-5) !important;
+  border-radius: 999px;
+}
+
+.sampling-pill-btn {
+  padding: var(--fib-2) var(--fib-8) !important;
+  font-size: var(--scale-micro) !important;
+}
+
+/* Notice Bar */
+.notice-bar {
+  min-height: 38px !important;
+  gap: var(--fib-8) !important;
+  padding: 0 var(--fib-13) !important;
+  margin-top: var(--fib-13) !important;
+  border-radius: var(--fib-8) !important;
+  font-size: var(--scale-xs) !important;
+}
+
+/* Footer */
+.instrument-footer {
+  padding-top: var(--fib-21) !important;
+  font-size: var(--scale-micro) !important;
+  letter-spacing: 0.1em;
+}
+
+/* ==========================================================================
+   MATHEMATICAL RESPONSIVE BREAKPOINTS (Fibonacci & Golden Ratio)
+   ========================================================================== */
+
+/* Laptop / Desktop Transition (Width <= 1220px) */
+@media (max-width: 1220px) {
+  .telemetry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: var(--fib-13) !important;
+  }
+  .chart-grid.secondary {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .chart-grid.secondary > *:last-child {
+    grid-column: span 2 !important;
+  }
+  .dual-hero-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Tablet Transition (Width <= 987px = Fibonacci F15) */
+@media (max-width: 987px) {
+  .side-rail {
+    left: -250px !important;
+    width: var(--fib-233) !important;
+  }
+  .side-rail.open {
+    left: 0 !important;
+  }
+  .rail-close, .mobile-rail-trigger {
+    display: grid !important;
+  }
+  .rail-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+  }
+  .platform-main {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
+  .platform-topbar {
+    padding: 0 var(--fib-13) !important;
+  }
+  .hero-grid, .chart-grid.primary, .chart-grid.live {
+    grid-template-columns: 1fr !important;
+  }
+  .live-status-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: var(--fib-8) !important;
+  }
+  .live-alert {
+    grid-column: span 2 !important;
+    justify-self: start;
+  }
+}
+
+/* Mobile Transition (Width <= 610px = Fibonacci F14) */
+@media (max-width: 610px) {
+  .page-wrap {
+    padding: var(--fib-13) var(--fib-8) !important;
+  }
+  .instrument-heading {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+    gap: var(--fib-13) !important;
+  }
+  .heading-actions {
+    width: 100% !important;
+  }
+  .sampling-control-group {
+    width: 100% !important;
+    justify-content: space-between;
+  }
+  .live-status-bar {
+    grid-template-columns: 1fr !important;
+    gap: var(--fib-5) !important;
+    padding: var(--fib-8) !important;
+  }
+  .live-status-item {
+    border-right: 0 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: var(--fib-5);
+  }
+  .live-alert {
+    grid-column: span 1 !important;
+    width: 100% !important;
+    justify-content: center;
+  }
+  .telemetry-grid {
+    grid-template-columns: 1fr !important;
+    gap: var(--fib-8) !important;
+  }
+  .chart-grid.secondary {
+    grid-template-columns: 1fr !important;
+  }
+  .chart-grid.secondary > *:last-child {
+    grid-column: auto !important;
+  }
+  .hero-readout > strong {
+    font-size: clamp(48px, 14vw, 68px) !important;
+  }
+  .hero-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .stop-button {
+    min-height: 68px !important;
+  }
+  .instrument-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--fib-8);
+  }
+}
+
 
