@@ -1,6 +1,6 @@
 # ESP32 & MATLAB/Simulink Extended Kalman Filter (EKF) MPPT Control Platform
 
-> **Comprehensive End-to-End Engineering Platform featuring 2-State EKF State Estimation, Analytical Halley Lambert-W MPPT Solver, 50 kHz DC-DC Boost Converter, ESP32 FreeRTOS Dual-Core Microcontroller Firmware, WebSerial USB Telemetry, and React Live Dashboard.**
+> **Comprehensive End-to-End Engineering Platform featuring 2-State EKF State Estimation, Analytical Halley Lambert-W MPPT Solver, 50 kHz DC Resistive Chopper (Copper Load) & Boost Converter, ESP32 FreeRTOS Dual-Core Microcontroller Firmware, WebSerial USB Telemetry, and React Live Dashboard.**
 
 ---
 
@@ -11,7 +11,7 @@ Solar Photovoltaic (PV) power generation exhibits non-linear Current-Voltage ($I
 This project delivers an integrated, state-of-the-art MPPT engineering platform consisting of:
 1. **Physical PV & Thermal Modeling**: Single-diode 5-parameter model coupled with dynamic cell thermal equations in MATLAB/Simulink (`Zero_Perturb_MPPT_Live.slx`).
 2. **State Estimation MPPT (2-State Extended Kalman Filter)**: Real-time joint state estimation of effective photocurrent ($\hat{I}_{ph}$) and cell temperature ($\hat{T}_c$) with analytical Halley Lambert-W calculation of optimal maximum power voltage ($V_{mp\_ref}$) yielding zero steady-state oscillation ($<0.2\%$).
-3. **50 kHz DC-DC Boost Power Stage**: High-frequency power converter operating in Continuous Conduction Mode (CCM) with dynamic impedance matching.
+3. **50 kHz Power Electronics Stage (DC Resistive Chopper / Boost)**: High-frequency power stage with dynamic impedance matching, operating either as a **50 kHz DC Chopper with switched resistive copper load** ($R_{in} = \frac{R_{copper}}{D}$) for direct power characterization/heating or a **DC-DC Boost Converter** ($R_{in} = R_L(1-D)^2$) for battery storage.
 4. **ESP32 FreeRTOS Microcontroller Firmware**: C++ firmware running a 50 Hz control loop on **Core 1** and asynchronous JSON telemetry broadcasting on **Core 0**.
 5. **Real-Time Web Dashboard**: React 18 / TypeScript frontend supporting 1-Click native browser **WebSerial USB** communication (at 115200 baud), WebSocket live feeds (`ws://localhost:3000/ws/matlab` & `/ws/esp32`), and SQLite database persistence.
 
@@ -33,18 +33,18 @@ graph TD
     subgraph Sub2["2. Embedded ESP32 / Simulink EKF Controller"]
         Sensors -->|"V_meas, I_meas, T_meas"| EKF["2-State Extended Kalman Filter (EKF)"]
         EKF -->|"States [I_ph_est, T_c_est]"| LambertW["Halley Lambert-W V_mp Solver"]
-        LambertW -->|"Target V_mp_ref"| DutyCtrl["Inner PI Duty Controller"]
+        LambertW -->|"Target V_mp_ref"| DutyCtrl["Inner PI / InC Duty Controller"]
         DutyCtrl -->|"PWM Duty D"| PWMGen["50 kHz Dual-Core PWM Engine"]
     end
 
-    subgraph Sub3["3. 50 kHz DC-DC Boost Converter Power Stage"]
+    subgraph Sub3["3. 50 kHz DC Chopper / Boost Power Stage"]
         PWMGen -->|"PWM Gate Pulse"| Driver["TC4420 12V High-Speed Gate Driver"]
         Driver --> MOSFET["IRF540N Power MOSFET Switch (Q)"]
-        PV -->|"V_pv, I_pv"| Inductor["Boost Inductor (L = 150 µH / 1 mH)"]
-        Inductor --> MOSFET
-        MOSFET --> Diode["Ultra-Fast Recovery Diode (MBR20100CT)"]
-        Diode --> OutCap["Output Capacitor (C_out = 470 µF)"]
-        OutCap --> Load["12V DC Battery / Bus Load"]
+        PV -->|"V_pv, I_pv"| InCap["Input Buffer Capacitor (C_in = 470 µF)"]
+        InCap --> CopperLoad["Resistive Copper Load (R_copper <= R_mp)"]
+        CopperLoad --> MOSFET
+        MOSFET --> Flyback["Optional Flyback Diode (Parasitic Inductance Snubber)"]
+        MOSFET --> GND["System Common GND"]
     end
 
     subgraph Sub4["4. Real-Time Telemetry & Web Dashboard"]
@@ -283,6 +283,46 @@ Think of the system like a modern sports car with an intelligent computer:
 
 ---
 
+### **Q8: How does the system change when using a switched Resistive Copper Load (DC Chopper) instead of a Boost Converter?**
+**Answer:**
+When switching from an active inductive boost converter to a **PWM-switched Resistive Copper Load (DC Chopper)**, the electrical and physical behavior transforms in several key ways:
+
+1. **Component Elimination & Simplification**:
+   - **Boost Converter**: Requires a bulky power inductor ($L = 150\,\mu\text{H}\text{--}1\,\text{mH}$), an ultra-fast freewheeling diode ($D_{boost}$), and a high-voltage output capacitor ($C_{out}$).
+   - **Resistive Chopper**: Completely **eliminates the inductor ($L$)** and the **freewheeling diode ($D$)**. The power stage consists solely of the low-side MOSFET ($Q$) switching the copper wire resistor ($R_{copper}$) across the panel at $50\text{ kHz}$.
+
+2. **Voltage & Power Transfer Physics**:
+   - In a boost converter, energy is stored magnetically in the inductor and stepped up to a higher voltage ($V_{out} = \frac{V_{pv}}{1-D} \ge V_{pv}$) to charge a battery or supply a high-voltage bus.
+   - In a resistive chopper, there is **no step-up action**. When the switch is ON, the resistor sees $V_{pv}$; when OFF, it sees $0\text{V}$. The average voltage across the copper resistor is $V_{load,avg} = D \cdot V_{pv} \le V_{pv}$. All extracted electrical energy is directly converted into **thermal Joule heating ($I^2 R_{copper}$)** in the copper wire.
+
+3. **Impedance Matching Equation**:
+   - Boost Converter:
+     $$R_{in} = R_{load} (1 - D)^2$$
+   - Resistive Chopper (Copper Load):
+     During switch ON-time ($D \cdot T_{sw}$), $I_{peak} = \frac{V_{pv}}{R_{copper}}$. During OFF-time, $I = 0$.
+     The average current drawn over one cycle is $I_{avg} = D \cdot \frac{V_{pv}}{R_{copper}}$.
+     Therefore, the apparent input resistance seen by the solar panel is:
+     $$R_{in,eff} = \frac{V_{pv}}{I_{avg}} = \frac{R_{copper}}{D}$$
+
+4. **The Critical Sizing Rule ($R_{copper} \le R_{mp}$)**:
+   - Because duty cycle $D$ cannot exceed $1.0$ ($100\%$), the **minimum** resistance the chopper can present to the panel is $R_{copper}$ (when $D = 1$).
+   - As $D$ decreases, $R_{in}$ rises toward infinity ($R_{copper} \le R_{in} < \infty$).
+   - **Crucial Rule**: The physical copper wire resistance $R_{copper}$ **must be strictly smaller than or equal to the panel's Maximum Power Point resistance ($R_{mp} = \frac{V_{mp}}{I_{mp}}$)**.
+     - For a 10W panel ($V_{mp} \approx 17.5\text{V}, I_{mp} \approx 0.57\text{A} \implies R_{mp} \approx 30.7\,\Omega$), $R_{copper}$ must be chosen $\le 30\,\Omega$ (e.g. $5\,\Omega\text{--}15\,\Omega$).
+     - If $R_{copper} > R_{mp}$, the chopper can never reach the MPP point, and the panel will be stuck in the open-circuit region!
+
+5. **Current Waveforms & Input Buffer Capacitor ($C_{in}$)**:
+   - Without an inductor to smooth the input current, the MOSFET draws discontinuous pulsating square-wave blocks ($0$ to $I_{peak}$).
+   - A large, low-ESR electrolytic capacitor ($C_{in} \ge 470\,\mu\text{F}$) must be placed directly across the PV panel terminals (+ and -). The PV panel charges $C_{in}$ with continuous DC current at $I_{mp}$, while $C_{in}$ delivers the pulsed currents to the copper load.
+
+6. **Firmware MPPT Compatibility**:
+   - In both topologies:
+     - Increasing duty ($D \uparrow$) decreases effective resistance ($R_{in} \downarrow$), drawing more current and pulling panel voltage down ($V_{pv} \downarrow$).
+     - Decreasing duty ($D \downarrow$) increases effective resistance ($R_{in} \uparrow$), drawing less current and allowing panel voltage to rise ($V_{pv} \uparrow$).
+   - Because $\frac{\partial V_{pv}}{\partial D} < 0$ in both systems, the Incremental Conductance algorithm on Core 1 of the ESP32 functions **identically with zero code modifications**!
+
+---
+
 ## 6. Web Technology Stack Architecture
 
 ### 6.1 Layer-by-Layer Technology Breakdown
@@ -304,28 +344,47 @@ Think of the system like a modern sports car with an intelligent computer:
 
 ## 7. ESP32 Hardware Wiring & Schematic Guide
 
+### 7.1 Primary Hardware Topology: 50 kHz DC Chopper (Resistive Copper Load)
+
 ```
 +---------------------------------------------------------------------------------+
-|                         ESP32 MPPT HARDWARE SCHEMATIC                           |
+|               ESP32 MPPT HARDWARE SCHEMATIC (RESISTIVE COPPER LOAD)             |
 +---------------------------------------------------------------------------------+
-| [PV Panel (+)] ----------> [INA219 Vin+]                                        |
-| [INA219 Vin-]  ----------> [Boost Inductor L (150uH / 1mH)]                      |
-|                            [Boost Inductor] ------> [IRF540N MOSFET Drain (D)]  |
-|                                             ------> [MBR20100CT Diode Anode]    |
-| [MBR20100CT Cathode] ----> [Output Capacitor 470uF] --> [12V Battery / Load (+)]|
-| [IRF540N Source (S)] ----> [COMMON SYSTEM GND (0V)]                            |
+| [PV Panel (+)] -------------> [INA219 Vin+]                                     |
+| [INA219 Vin-]  -------------> [Buffer Capacitor C_in (+)] (470 µF / 35V)        |
+|                                [Buffer Capacitor C_in (-)] -> [COMMON GND]      |
+|                                ------> [Resistive Copper Wire R_copper (5-15Ω)] |
+| [Copper Wire Return] -------> [IRF540N MOSFET Drain (D)]                        |
+|                                ------> [Flyback Diode Anode (e.g. 1N5819/UF4007)]|
+|                                        (Cathode connected to PV + rail)         |
+| [IRF540N Source (S)] -------> [COMMON SYSTEM GND (0V)]                          |
 |                                                                                 |
-| ESP32 GPIO25 (PWM) ------> [TC4420 Driver Input (Pin 2)]                        |
-| 12V Auxiliary Rail ------> [TC4420 VDD (Pin 6)]                                 |
-| [TC4420 Output (Pin 7)] --> [10 Ohm Gate Resistor] ---> [IRF540N Gate (G)]      |
-| [IRF540N Gate (G)] -------> [100k Ohm Pull-Down] ------> [COMMON SYSTEM GND]   |
+| ESP32 GPIO 18 (PWM) --------> [TC4420 Driver Input (Pin 2)]                     |
+| 12V Auxiliary Rail ---------> [TC4420 VDD (Pin 6)]                              |
+| [TC4420 Output (Pin 7)] ----> [10 Ohm Gate Resistor] ----> [IRF540N Gate (G)]   |
+| [IRF540N Gate (G)] ---------> [100k Ohm Pull-Down] ------> [COMMON SYSTEM GND]  |
 |                                                                                 |
-| ESP32 GPIO21 (SDA) ------> [INA219 SDA]                                         |
-| ESP32 GPIO22 (SCL) ------> [INA219 SCL]                                         |
-| ESP32 GPIO4  (1-Wire) ---> [DS18B20 Temp Sensor Data] (4.7k Pull-up to 3.3V)   |
-| ESP32 Micro-USB Cable ---> [Laptop USB Port (COM5 - CH340 / CP210x)]            |
+| ESP32 GPIO 21 (SDA) --------> [INA219 SDA]                                      |
+| ESP32 GPIO 22 (SCL) --------> [INA219 SCL]                                      |
+| ESP32 GPIO 4  (1-Wire) -----> [DS18B20 Temp Sensor Data] (4.7k Pull-up to 3.3V) |
+| ESP32 Micro-USB Cable ------> [Laptop USB Port (COM5 / COM8 - WebSerial UI)]    |
 |                                                                                 |
-| ALL GROUNDS (ESP32 GND, INA219 GND, 12V GND, PV GND) ARE COMMON                |
+| ALL GROUNDS (ESP32 GND, INA219 GND, 12V GND, PV GND) ARE COMMON (0V)            |
++---------------------------------------------------------------------------------+
+```
+
+### 7.2 Alternative Topology: 50 kHz DC-DC Boost Converter (Battery Charging)
+
+```
++---------------------------------------------------------------------------------+
+|               ESP32 MPPT HARDWARE SCHEMATIC (DC-DC BOOST CONVERTER)             |
++---------------------------------------------------------------------------------+
+| [PV Panel (+)] -------------> [INA219 Vin+]                                     |
+| [INA219 Vin-]  -------------> [Boost Inductor L (150 µH / 1 mH)]                |
+|                               [Boost Inductor] --------> [IRF540N MOSFET Drain] |
+|                                                        > [MBR20100CT Diode (+)] |
+| [MBR20100CT Diode (-)] -----> [Output Capacitor 470 µF] -> [12V Battery / Bus+] |
+| [IRF540N Source (S)] -------> [COMMON SYSTEM GND (0V)]                          |
 +---------------------------------------------------------------------------------+
 ```
 

@@ -10,7 +10,7 @@ Solar Photovoltaic (PV) power generation exhibits inherently non-linear Current-
 This project delivers an end-to-end, high-performance MPPT engineering platform consisting of:
 1. **Physical PV & Thermal Modeling**: Single-diode 5-parameter model coupled with dynamic cell thermal equations in MATLAB/Simulink (`ekf.slx`).
 2. **State Estimation MPPT (Extended Kalman Filter)**: Real-time joint estimation of effective photocurrent ($I_{ph}$), cell temperature ($T_c$), and exact maximum power point voltage ($V_{mp\_ref}$) with zero steady-state oscillation.
-3. **Power Electronics Stage**: $50\text{ kHz}$ DC-DC Boost Converter operating in Continuous Conduction Mode (CCM) for impedance matching between the PV array and the DC bus/load.
+3. **Power Electronics Stage**: $50\text{ kHz}$ DC Chopper utilizing a switched resistive copper load ($R_{copper}$) for dynamic impedance matching, with dual compatibility for DC-DC Boost Converter mode.
 4. **Hardware-in-the-Loop & Live Telemetry Engine**: Continuous, chunked live simulation streaming at $15\text{ Hz}$ from Simulink via HTTP REST and WebSockets into a modern, real-time React/TypeScript web dashboard with persistent SQLite database logging.
 
 ---
@@ -23,24 +23,25 @@ graph TD
         G["Solar Irradiance G(t)"] --> PV["Navin Single-Diode Model"]
         Tamb["Ambient Temp T_amb(t)"] --> Thermal["Dynamic Cell Thermal Model"]
         Thermal -->|T_c| PV
-        PV -->|V_pv, I_pv| Sensors["Voltage & Current Sensors"]
+        PV -->|V_pv, I_pv| Sensors["Voltage & Current Sensors (INA219)"]
     end
 
     subgraph Controller["2. Embedded / Simulated Controller"]
         Sensors -->|V_pv_meas, I_pv_meas| EKF["Extended Kalman Filter (EKF)"]
         Thermal -->|T_c_meas| EKF
         Tamb -->|T_amb| EKF
-        EKF -->|V_mp_ref| DutyCtrl["PWM Duty Controller (PI / Direct)"]
-        DutyCtrl -->|Duty D| PWMGen["50 kHz PWM Generator"]
+        EKF -->|V_mp_ref| DutyCtrl["PWM Duty Controller (InC / Direct)"]
+        DutyCtrl -->|Duty D| PWMGen["50 kHz PWM Generator (Core 1)"]
     end
 
-    subgraph PowerStage["3. 50 kHz DC-DC Boost Converter"]
-        PWMGen -->|Gate Drive| MOSFET["Power MOSFET Switch (Q)"]
-        PV -->|V_pv, I_pv| Inductor["Boost Inductor (L)"]
-        Inductor --> MOSFET
-        MOSFET --> Diode["Ultra-Fast Diode (D_boost)"]
-        Diode --> OutCap["Output Capacitor (C_out)"]
-        OutCap --> Load["DC Load / Battery (R_L)"]
+    subgraph PowerStage["3. 50 kHz Power Electronics Stage (Resistive Chopper / Boost)"]
+        PWMGen -->|Gate Drive| Driver["TC4420 High-Speed Gate Driver"]
+        Driver --> MOSFET["Power MOSFET Switch (Q: IRF540N)"]
+        PV -->|V_pv, I_pv| InCap["Input Buffer Capacitor (C_in >= 470 µF)"]
+        InCap --> CopperLoad["Resistive Copper Load (R_copper <= R_mp)"]
+        CopperLoad --> MOSFET
+        MOSFET --> Flyback["Optional Flyback Diode (Parasitic Inductance Snubber)"]
+        MOSFET --> GND["System Common GND"]
     end
 
     subgraph Telemetry["4. Real-Time Telemetry & Web Dashboard"]
@@ -134,37 +135,93 @@ This reference $V_{mp\_ref}$ is fed forward to the duty cycle controller without
 
 ---
 
-## 4. Power Electronics: 50 kHz DC-DC Boost Converter
+## 4. Power Electronics Stage: Resistive Chopper (Copper Load) vs. DC-DC Boost Converter
+
+The system supports two distinct power conversion configurations:
+1. **The 50 kHz Resistive Chopper (Copper Wire Load)** — *Primary experimental laboratory setup*
+2. **The 50 kHz DC-DC Boost Converter** — *Grid / battery charging setup*
+
+---
+
+### 4.1 Topology A: 50 kHz DC Resistive Chopper (Copper Wire Load)
+
+In the experimental hardware platform, the active inductive boost converter is replaced by a **PWM-switched Resistive Copper Load (DC Chopper)**. The MOSFET directly modulates power dissipation across a calibrated copper wire resistor ($R_{copper}$) without requiring bulky inductors or freewheeling diodes.
 
 ```
-        +--------- L (1 mH) ---------+------>| Diode (UF5404) ----+--------+  (+) V_out
+       +--------------------+-----------------------------+  (+) PV V_pv
+       |                    |                             |
+       |                    |                             |
+   [PV Array]          [C_in Buffer]              [Copper Resistor R_copper]
+  (V_pv, I_pv)         (470 µF Low-ESR)           (e.g., 5 Ω - 15 Ω wire)
+       |                    |                             |
+       |                    |                             +----->| Flyback Diode (Optional)
+       |                    |                             |
+       |                    |                         [MOSFET Q] (IRF540N)
+       |                    |                         (50 kHz Gate Drive from TC4420)
+       |                    |                             |
+       +--------------------+-----------------------------+  (-) System GND
+```
+
+#### 4.1.1 Mathematical Derivation of Impedance Matching
+When the MOSFET switch $Q$ is closed for time $t_{on} = D \cdot T_{sw}$ (where $D$ is duty cycle $\in [0, 1]$ and $T_{sw} = 20\text{ }\mu\text{s}$ at $50\text{ kHz}$):
+- Peak instantaneous current through the copper resistor is:
+  $$I_{peak} = \frac{V_{pv}}{R_{copper}}$$
+- When the switch is open for $t_{off} = (1 - D) \cdot T_{sw}$, the resistor current drops to $0\text{ A}$.
+- The **average input current** drawn from the PV panel and input buffer capacitor over one switching cycle is:
+  $$I_{in,avg} = D \cdot I_{peak} = D \cdot \frac{V_{pv}}{R_{copper}}$$
+- Consequently, the **apparent input resistance ($R_{in,eff}$)** seen across the PV panel terminals is:
+  $$R_{in,eff} = \frac{V_{pv}}{I_{in,avg}} = \frac{V_{pv}}{D \cdot \frac{V_{pv}}{R_{copper}}} = \frac{R_{copper}}{D}$$
+
+#### 4.1.2 Optimal MPPT Duty Cycle ($D^*$)
+To operate at the Maximum Power Point (MPP), the effective input resistance must equal the panel's characteristic MPP resistance $R_{mp} = \frac{V_{mp}}{I_{mp}}$:
+$$\frac{R_{copper}}{D^*} = R_{mp} \implies D^* = \frac{R_{copper}}{R_{mp}} = \frac{R_{copper} \cdot I_{mp}}{V_{mp}}$$
+
+#### 4.1.3 Critical Operational Boundary Condition ($R_{copper} \le R_{mp}$)
+Since the duty cycle is constrained within $0 < D \le 1$:
+- The **minimum** resistance the chopper can synthesize is $R_{copper}$ (at $D = 1$).
+- The chopper can only **increase** apparent resistance toward infinity ($R_{copper} \le R_{in,eff} < \infty$).
+- **Mandatory Hardware Rule**: The physical resistance of the copper wire **must be strictly less than or equal to $R_{mp}$**:
+  $$R_{copper} \le R_{mp} = \frac{V_{mp}}{I_{mp}}$$
+  *Example*: For a 10W panel with $V_{mp} \approx 17.5\text{ V}$ and $I_{mp} \approx 0.57\text{ A}$, $R_{mp} \approx 30.7\text{ }\Omega$. If a copper wire of $R_{copper} = 10\text{ }\Omega$ is used, the optimal duty cycle is $D^* = \frac{10}{30.7} \approx 32.6\%$. If $R_{copper} > 30.7\text{ }\Omega$, MPP can **never** be reached!
+
+#### 4.1.4 Crucial Role of Input Buffer Capacitor ($C_{in}$)
+Unlike a boost converter where an inductor keeps input current smooth, a chopper draws pulsing square-wave current ($0$ to $I_{peak}$). Without a large input capacitor, the PV panel voltage would collapse to zero on every pulse. A low-ESR electrolytic capacitor ($C_{in} \ge 470\text{ }\mu\text{F}$) across the panel acts as a charge reservoir: the panel continuously charges $C_{in}$ at smooth DC current $I_{mp}$, and $C_{in}$ delivers the pulsed current to the copper load.
+
+---
+
+### 4.2 Topology B: 50 kHz DC-DC Boost Converter (CCM)
+
+In grid-tied or battery charging applications, the boost converter steps up the panel voltage above the DC bus level:
+
+```
+        +--------- L (1 mH) ---------+------>| Diode (MBR20100CT) -+--------+  (+) V_out
         |                            |                            |        |
      [PV Array]                    [MOSFET Q]                   [C_out] [Load R_L]
-     (V_pv, I_pv)                  (50 kHz PWM)                 (220 µF) (100 Ω)
+    (V_pv, I_pv)                  (50 kHz PWM)                 (470 µF) (12V/24V)
         |                            |                            |        |
         +----------------------------+----------------------------+--------+  (-) GND
 ```
 
-### 4.1 Topology Specifications
-| Component | Design Parameter | Value / Rating | Function |
-| :--- | :--- | :--- | :--- |
-| **Switching Frequency ($f_{sw}$)** | $50\text{ kHz}$ ($T_{sw} = 20\text{ }\mu\text{s}$) | Fast response, small magnetic core size |
-| **Boost Inductor ($L$)** | $1.0\text{ mH}$ (ferrite core) | Continuous Conduction Mode (CCM), current ripple $<15\%$ |
-| **Input Filter ($C_{in}$)** | $100\text{ }\mu\text{F}$ Low-ESR Electrolytic | Minimizes PV terminal voltage ripple |
-| **Output Filter ($C_{out}$)** | $220\text{ }\mu\text{F}$, $100\text{ V}$ Low-ESR | Suppresses DC output voltage ripple to $<1\%$ |
-| **Power MOSFET ($Q$)** | $N\text{-Channel}$, $R_{DS(on)} = 18\text{ m}\Omega$ | High-efficiency fast switching |
-| **Boost Diode ($D$)** | Ultra-Fast Recovery ($t_{rr} < 35\text{ ns}$) | Eliminates reverse recovery power loss |
+* **Voltage Conversion**: $V_{out} = \frac{V_{pv}}{1 - D} \ge V_{pv}$
+* **Apparent Input Resistance**: $R_{in,apparent} = R_L \cdot (1 - D)^2$
+* **Optimal Duty Cycle**: $D^* = 1 - \sqrt{\frac{R_{mp}}{R_L}}$ (requires $R_L > R_{mp}$)
 
-### 4.2 Steady-State Converter Equations (CCM)
-* **Voltage Conversion**: $V_{out} = \frac{V_{pv}}{1 - D}$
-* **Current Conversion**: $I_{out} = I_{pv} \cdot (1 - D)$
-* **Apparent Impedance Matching**: The converter transforms the load resistance $R_L$ into an apparent input resistance seen by the PV panel:
+---
 
-$$R_{in,apparent} = \frac{V_{pv}}{I_{pv}} = R_L \cdot (1 - D)^2$$
+### 4.3 Side-by-Side Comparison: Resistive Chopper vs. Boost Converter
 
-To operate at the Maximum Power Point where $R_{in,apparent} = R_{mp} = \frac{V_{mp}}{I_{mp}}$, the optimal duty cycle $D^*$ is:
-
-$$D^* = 1 - \sqrt{\frac{R_{mp}}{R_L}} = 1 - \sqrt{\frac{V_{mp} / I_{mp}}{R_L}}$$
+| Engineering Metric | Resistive Chopper (Copper Wire Load) | DC-DC Boost Converter |
+| :--- | :--- | :--- |
+| **Active Components** | MOSFET ($Q$) + Input Capacitor ($C_{in}$) | MOSFET ($Q$) + Inductor ($L$) + Diode ($D$) + $C_{out}$ |
+| **Bulky Inductor Needed?** | **NO** (Zero magnetic core loss / winding weight) | **YES** ($150\text{ }\mu\text{H}\text{--}1.0\text{ mH}$ ferrite core) |
+| **Freewheeling Diode?** | Not required for pure resistance (optional flyback for wire parasitic inductance) | **Mandatory** (Ultra-fast power diode, e.g. MBR20100CT) |
+| **Output Voltage Behavior** | $V_{load,avg} = D \cdot V_{pv} \le V_{pv}$ (Step-Down / Direct Heating) | $V_{out} = \frac{V_{pv}}{1-D} \ge V_{pv}$ (Step-Up to Battery/DC Bus) |
+| **Impedance Formula** | $R_{in} = \frac{R_{copper}}{D}$ | $R_{in} = R_L (1 - D)^2$ |
+| **Load Resistance Constraint** | **$R_{copper} \le R_{mp}$** (Must be smaller than MPP resistance) | **$R_L \ge R_{mp}$** (Must be greater than MPP resistance) |
+| **Optimal Duty Cycle $D^*$** | $D^* = \frac{R_{copper}}{R_{mp}}$ | $D^* = 1 - \sqrt{\frac{R_{mp}}{R_L}}$ |
+| **Current from PV Panel** | Pulsing without $C_{in}$; smooth DC with $C_{in} \ge 470\text{ }\mu\text{F}$ | Naturally smooth continuous current (CCM triangle ripple) |
+| **Energy Destination** | $100\%$ dissipated as thermal Joule heating in copper wire | Transferred to DC battery or grid inverter |
+| **Firmware MPPT Logic** | **Identical** ($\frac{\partial V_{pv}}{\partial D} < 0$, InC sign remains the same) | **Identical** ($\frac{\partial V_{pv}}{\partial D} < 0$, InC sign remains the same) |
 
 ---
 
@@ -227,10 +284,11 @@ Use this outline to prepare presentation slides for reviews, vivas, and project 
 * Predict-Update cycle: Analytical Jacobian linearization $\mathbf{H}_k = \frac{\partial h}{\partial \mathbf{x}}$.
 * Kalman Gain $\mathbf{K}_k$ dynamically balances sensor noise covariance $R$ vs process variance $\mathbf{Q}$.
 
-### Slide 6: Power Electronics: 50 kHz DC-DC Boost Converter
-* Converter circuit schematic (Inductor $1\text{ mH}$, MOSFET, Ultra-Fast Diode, Output Filter $220\text{ }\mu\text{F}$).
-* Continuous Conduction Mode (CCM) analysis: $V_{out} = \frac{V_{pv}}{1-D}$.
-* Dynamic impedance matching: $R_{in,apparent} = R_L (1-D)^2 \implies D^* = 1 - \sqrt{R_{mp}/R_L}$.
+### Slide 6: Power Electronics: 50 kHz Resistive Chopper (Copper Load) & Boost Stage
+* **Resistive Chopper (Hardware Setup)**: Switched copper load $R_{copper}$, TC4420 driver, IRF540N MOSFET, input buffer capacitor $C_{in} \ge 470\text{ }\mu\text{F}$.
+* **Impedance Transformation**: $R_{in,eff} = \frac{R_{copper}}{D} \implies$ optimal duty $D^* = \frac{R_{copper}}{R_{mp}}$ (requires $R_{copper} \le R_{mp}$).
+* **Comparison with Boost Converter**: Boost steps up voltage ($V_{out} = \frac{V_{pv}}{1-D}$) using inductor $L$ and diode $D$, whereas the resistive chopper directly dissipates power as thermal energy into copper without magnetic inductor bulk.
+* **Algorithmic Compatibility**: Both topologies exhibit $\frac{\partial V_{pv}}{\partial D} < 0$, allowing identical firmware MPPT control logic.
 
 ### Slide 7: Validation Scenarios & Dynamic Simulation Results
 * **Scenario S1 (Standard STC)**: $G = 1000\text{ W/m}^2$, $T = 25\text{ }^\circ\text{C}$ — Steady-state tracking with zero oscillation.
