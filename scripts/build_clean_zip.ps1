@@ -58,6 +58,7 @@ $includeItems = @(
     "README.md",
     "HelioTrack_MPPT_Technical_Report_and_Benchmark.docx",
     "HELIOTRACK_ALGORITHM_BENCHMARK_DOCUMENTATION.md",
+    "SIMULATION_COMPARISON_AND_MATHEMATICAL_PROOFS.md",
     "add_to_desktop.bat",
     "launch_dashboard.bat",
     ".gitignore",
