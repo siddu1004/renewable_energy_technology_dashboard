@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1926" />
+      <stop offset="50%" stop-color="#07131d" />
+      <stop offset="100%" stop-color="#03080d" />
+    </linearGradient>
+
+    <!-- Border Glow -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#72e3d2" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.6" />
+    </linearGradient>
+
+    <!-- Solar Gold Gradient -->
+    <linearGradient id="solarGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a" />
+      <stop offset="40%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+
+    <!-- Cyan / Teal Energy Pulse Gradient -->
+    <linearGradient id="energyCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="30%" stop-color="#a7f3d0" />
+      <stop offset="70%" stop-color="#72e3d2" />
+      <stop offset="100%" stop-color="#0ea5e9" />
+    </linearGradient>
+
+    <!-- Radial Solar Glow -->
+    <radialGradient id="sunGlow" cx="50%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.45" />
+      <stop offset="45%" stop-color="#72e3d2" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#0a1926" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Drop Shadow Filter -->
+    <filter id="glowFilter" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <filter id="boltGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur1" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Base Rounded Container -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="6" />
+
+  <!-- Background Ambient Glow -->
+  <circle cx="256" cy="200" r="180" fill="url(#sunGlow)" />
+
+  <!-- Outer Orbital Energy Rings (Representing EKF Tracking State) -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#72e3d2" stroke-width="2" stroke-dasharray="8 14" opacity="0.35" />
+  <circle cx="256" cy="256" r="160" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="16 10" opacity="0.4" />
+
+  <!-- Radiant Solar Rays (Helio Symbolism) -->
+  <g stroke="url(#solarGold)" stroke-width="4" stroke-linecap="round" opacity="0.75">
+    <line x1="256" y1="58" x2="256" y2="82" />
+    <line x1="140" y1="92" x2="157" y2="109" />
+    <line x1="372" y1="92" x2="355" y2="109" />
+    <line x1="92" y1="190" x2="116" y2="198" />
+    <line x1="420" y1="190" x2="396" y2="198" />
+  </g>
+
+  <!-- Photovoltaic Panel Grid (Isometric Perspective) -->
+  <g id="solarPanel" transform="translate(0, 40)">
+    <!-- Base Panel Slab -->
+    <polygon points="120,290 256,215 392,290 256,365" fill="#0b2233" stroke="#38bdf8" stroke-width="3.5" opacity="0.9" />
+
+    <!-- Grid Cells (Top Layer) -->
+    <!-- Center Dividing Cross -->
+    <line x1="188" y1="252" x2="324" y2="327" stroke="#72e3d2" stroke-width="2" opacity="0.6" />
+    <line x1="324" y1="252" x2="188" y2="327" stroke="#72e3d2" stroke-width="2" opacity="0.6" />
+
+    <!-- Cell Outlines -->
+    <polygon points="196,252 256,220 316,252 256,285" fill="#13364f" stroke="#72e3d2" stroke-width="1.5" opacity="0.7" />
+    <polygon points="140,283 196,252 256,285 200,317" fill="#0f2b3f" stroke="#38bdf8" stroke-width="1.5" opacity="0.7" />
+    <polygon points="256,285 316,252 372,283 312,317" fill="#0f2b3f" stroke="#38bdf8" stroke-width="1.5" opacity="0.7" />
+    <polygon points="200,317 256,285 312,317 256,348" fill="#13364f" stroke="#72e3d2" stroke-width="1.5" opacity="0.7" />
+  </g>
+
+  <!-- Dynamic MPPT Tracking Lightning Bolt (High-Speed PWM & Optimal Power Vector) -->
+  <path d="M282 88 L184 256 L248 256 L218 418 L340 228 L270 228 Z"
+        fill="url(#energyCyan)"
+        filter="url(#boltGlow)"
+        stroke="#ffffff"
+        stroke-width="3"
+        stroke-linejoin="round" />
+
+  <!-- Core Radiant Sun Orb at the Crest -->
+  <circle cx="282" cy="94" r="18" fill="url(#solarGold)" filter="url(#glowFilter)" />
+  <circle cx="282" cy="94" r="8" fill="#ffffff" />
+
+  <!-- Tech Accent Particles (Photons / Telemetry Nodes) -->
+  <circle cx="340" cy="150" r="5" fill="#72e3d2" opacity="0.9" filter="url(#glowFilter)" />
+  <circle cx="170" cy="160" r="4" fill="#f59e0b" opacity="0.8" filter="url(#glowFilter)" />
+  <circle cx="160" cy="360" r="4.5" fill="#38bdf8" opacity="0.8" />
+  <circle cx="355" cy="350" r="5" fill="#72e3d2" opacity="0.85" filter="url(#glowFilter)" />
+</svg>

@@ -14,6 +14,13 @@ build/
 .env.test.local
 .env.production.local
 
+# IDE agent configs
+.agent/
+.agents/
+.claude/
+.gemini/
+.github/skills/
+
 # IDE and editor files
 .vscode/
 .idea/

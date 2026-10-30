@@ -1,15 +1,15 @@
 % =========================================================================
 % MASTER ORCHESTRATOR: EKF-BASED ZERO-PERTURBATION MPPT SYSTEM
-% Project: 10W PV System with Boost Converter and Extended Kalman Filter
+% Project: 10W PV System with PWM MOSFET DC Rheostatic Chopper (R = 23.7 Ohm)
 % Author: Systems Engineering Team
 % Description: 
-%   1. Defines PV module, converter, and EKF state-space parameters.
+%   1. Defines PV module, DC rheostatic chopper (23.7 Ohm), and EKF state-space parameters.
 %   2. Generates a realistic synthetic irradiance profile (cloud transient).
 %   3. Injects environmental time-series into Simulink Inports.
 %   4. Executes the simulation via ode23t solver.
 %   5. Quantifies MPPT tracking efficiency (Target: >= 97%).
 %   6. Exports reference telemetry CSV for IoT live overlay validation.
-%   7. Generates validation plots for evaluation presentation.
+%   7. Transmits telemetry frames to the dashboard (http://localhost:3000).
 %   8. Simulink Live Telemetry Streamer (Simulink Model Sliders -> Web Dashboard).
 % =========================================================================
 
@@ -35,41 +35,43 @@ fprintf('=======================================================\n\n');
 
 %% 1. SYSTEM PARAMETERS CONFIGURATION
 
-% --- 10W Polycrystalline PV Module Characteristics (at STC) ---
+% --- 10W Solar PV Module Characteristics (Section 2, 3.1 & 5.2) ---
 PV.P_max  = 10.0;             % Rated peak power [W]
-PV.V_mp   = 17.5;             % Voltage at MPP [V]
-PV.I_mp   = 0.57;             % Current at MPP [A]
-PV.V_oc   = 21.6;             % Open-circuit voltage [V]
-PV.I_sc   = 0.65;             % Short-circuit current [A]
-PV.n      = 1.30;             % Diode ideality factor (fitted)
-PV.R_s    = 0.28;             % Series resistance [Ohm] (fitted)
-PV.R_sh   = 350.0;            % Shunt resistance [Ohm] (fitted)
+PV.V_mp   = 19.25;            % Voltage at MPP [V] (STC Rated)
+PV.I_mp   = 0.52;             % Current at MPP [A] (520 mA STC Rated)
+PV.V_oc   = 22.50;            % Open-circuit voltage [V] (STC Rated)
+PV.I_sc   = 0.55;             % Short-circuit current [A] (550 mA STC Rated)
+PV.n      = 1.25;             % Diode ideality factor (Section 5.2)
+PV.R_s    = 0.25;             % Parasitic series resistance [Ohm] (Section 5.2)
+PV.R_sh   = 500.0;            % Parasitic shunt resistance [Ohm] (Section 5.2)
 PV.k      = 1.380649e-23;     % Boltzmann constant [J/K]
-PV.q      = 1.602176e-19;     % Electron charge [C]
+PV.q      = 1.60217663e-19;   % Elementary electron charge [C]
 PV.N_s    = 36;               % Number of series cells
 PV.T_ref  = 298.15;           % Reference temperature (25 C) [K]
 PV.G_ref  = 1000.0;           % Reference irradiance [W/m^2]
 PV.alpha  = 0.0005;           % Current temp coefficient [A/K]
 PV.E_g    = 1.12;             % Silicon bandgap energy [eV]
 
-% --- Boost Converter Specifications ---
-Boost.L   = 150e-6;           % Inductance [H]
-Boost.DCR = 0.06;             % Inductor DC series resistance [Ohm]
-Boost.C_in = 100e-6;          % Input capacitor [F]
-Boost.C_out = 470e-6;         % Output smoothing capacitor [F]
-Boost.f_sw = 50e3;            % Switching frequency [Hz] (50 kHz)
-Boost.T_sw = 1 / Boost.f_sw;  % Switching period [s]
+% --- PWM IRLZ44N MOSFET DC Rheostatic Chopper (Section 2, 3.4, 3.5 & 6) ---
+Chopper.R         = 23.7;            % Rheostatic load [Ohm] (2x47 Ohm / 25W parallel = 23.5-23.7 Ohm)
+Chopper.C_in      = 470e-6;          % Input DC buffer capacitor [F] (Cin >= 100 uF to 470 uF)
+Chopper.f_sw      = 10e3;            % Switching frequency [Hz] (10,000 Hz / 10 kHz 12-bit PWM)
+Chopper.T_sw      = 1 / Chopper.f_sw;% Switching period [s] (0.10 ms / 100 us)
+Chopper.D_min     = 0.02;            % Minimum duty cycle clamp
+Chopper.D_max     = 0.90;            % Maximum duty cycle clamp
+Chopper.R_mpp_stc = PV.V_mp / PV.I_mp; % Optimal STC impedance: 19.25V / 0.52A = 37.02 Ohm
+Chopper.D_stc     = Chopper.R / Chopper.R_mpp_stc; % STC Duty cycle: 23.7 / 37.02 = 0.640 (64.0%)
 
-% --- Load Parameters (12V Lead-Acid Battery / Stiff Bus) ---
-Bat.V_nom = 12.0;             % Nominal battery rail [V]
-Bat.R_int = 0.05;             % Internal cell resistance [Ohm]
-
-% --- Discrete EKF Algorithm Tuning (ESP32 Observer) ---
-EKF.T_sample = 10e-3;         % EKF execution loop period (10 ms / 100 Hz)
-EKF.Q        = 1e-4;          % Process noise covariance (random-walk tuning)
-EKF.R        = 2.5e-3;        % Measurement noise covariance (INA219 sensor noise)
-EKF.P_init   = 1.0;           % Initial estimation error covariance
-EKF.x_init   = 0.65;          % Initial state estimate I_ph [A]
+% --- 2-State EKF Observer & Tustin Bilinear PI Controller (Section 5.1 & 5.3) ---
+EKF.T_sample = 50e-3;                % Closed-loop execution period (50 ms / 20 Hz)
+EKF.tau_th   = 60.0;                 % Thermal convection time constant [s]
+EKF.Q        = diag([1.0e-6, 0.01]); % Process noise covariance matrix Q
+EKF.R        = diag([1.0e-5, 0.05]); % Measurement noise covariance matrix R (INA219 + DS18B20)
+EKF.P_init   = diag([1.0e-2, 1.0]);  % Initial error covariance
+EKF.x_init   = [0.55; 25.0];         % Initial state vector [I_ph (A); T_c (degC)]
+PI.Kp        = 1.20;                 % Proportional gain (e_k = V_pv - V_mp_ref)
+PI.Ki        = 0.50;                 % Integral gain (Tustin bilinear discretization)
+PI.deadband  = 0.040;                % Anti-hunting deadband (+/- 40 mV)
 
 
 %% 2. SYNTHETIC REALISTIC PROFILE GENERATION
@@ -117,7 +119,7 @@ fprintf('  Total steps: %d | Time window: 0 to %.2f s\n\n', N_pts, T_sim);
 %% 3. MODEL CONFIGURATION & EXECUTION
 
 mdl = '';
-candidates = {'Zero_Perturb_MPPT_Live', 'Zero_Perturb_MPPT_Build', 'Master_EKF_MPPT_System'};
+candidates = {'Zero_Perturb_MPPT_Chopper', 'Zero_Perturb_MPPT_Build', 'Zero_Perturb_MPPT_Live', 'Master_EKF_MPPT_System'};
 try
     curr = bdroot(gcs);
     if ~isempty(curr) && ~strcmp(get_param(curr, 'BlockDiagramType'), 'library') && ~strcmp(curr, 'nesl_utility')
@@ -218,22 +220,25 @@ P_pv_data   = P_pv_data(:);
 P_mpp_ideal = P_mpp_ideal(:);
 t_out       = t_out(:);
 
-% --- 5. MPPT TRACKING EFFICIENCY CALCULATION ---
-% Benchmark: Ramchandani et al. target >= 97%
+% --- 5. MPPT TRACKING EFFICIENCY CALCULATION (Section 7) ---
+% Energy Efficiency & EKF Voltage Tracking Convergence Metric:
+% eta_voltage = (1 - |V_actual - V_MPP| / V_MPP) * 100%
 energy_extracted = trapz(t_out, P_pv_data);
 energy_available = trapz(t_out, P_mpp_ideal);
 tracking_efficiency = (energy_extracted / energy_available) * 100.0;
+voltage_convergence_eff = mean(max(0.0, (1.0 - abs(V_pv_data - PV.V_mp) ./ PV.V_mp) * 100.0));
 
 fprintf('=======================================================\n');
 fprintf('             MPPT PERFORMANCE METRICS                  \n');
 fprintf('=======================================================\n');
-fprintf('  Total Theoretical Solar Energy : %8.3f Joules\n', energy_available);
-fprintf('  Total EKF Harvested Energy     : %8.3f Joules\n', energy_extracted);
-fprintf('  Tracking Efficiency (eta_MPPT) : %8.2f %%\n', tracking_efficiency);
+fprintf('  Total Theoretical Solar Energy   : %8.3f Joules\n', energy_available);
+fprintf('  Total EKF Harvested Energy       : %8.3f Joules\n', energy_extracted);
+fprintf('  Energy Tracking Efficiency       : %8.2f %%\n', tracking_efficiency);
+fprintf('  Voltage Convergence Efficiency   : %8.2f %% (Section 7 Metric)\n', voltage_convergence_eff);
 if tracking_efficiency >= 97.0
-    fprintf('  STATUS                         : TARGET ACHIEVED (>= 97.0%%)\n');
+    fprintf('  STATUS                           : TARGET ACHIEVED (>= 97.0%%)\n');
 else
-    fprintf('  STATUS                         : CHECK LOOP TUNING\n');
+    fprintf('  STATUS                           : CHECK LOOP TUNING\n');
 end
 fprintf('=======================================================\n\n');
 
@@ -273,17 +278,19 @@ try
         p = double(P_ekf_down(idx));
         i = max(0.01, p / max(v, 1.0));
         g = double(G_down(idx));
-        d = max(0.05, min(0.95, 1 - (v / 28.5)));
+        % PWM DC Rheostatic Chopper impedance matching (R = 23.7 Ohm)
+        d = max(Chopper.D_min, min(Chopper.D_max, (Chopper.R * i) / max(v, 1.0)));
+        v_rheo = d * v; % Average switched voltage across rheostatic load
         
         payload = struct( ...
             'timestampMs',   round(posixtime(datetime('now')) * 1000), ...
             'v_pv',         round(v * 100) / 100, ...
             'i_pv',         round(i * 1000) / 1000, ...
             'p_pv',         round(p * 100) / 100, ...
-            'v_mp',         17.50, ...
-            'i_ph',         round((g / 1000.0 * 0.65) * 1000) / 1000, ...
+            'v_mp',         19.25, ...
+            'i_ph',         round((g / 1000.0 * 0.55) * 1000) / 1000, ...
             'duty',         round(d * 1000) / 1000, ...
-            'v_out',        28.50, ...
+            'v_out',        round(v_rheo * 100) / 100, ...
             't_c',          25.0, ...
             'efficiency',   round(tracking_efficiency * 10) / 10, ...
             'scenarioCode', 'CLOUD_TRANSIENT');
@@ -302,7 +309,7 @@ end
 
 %% 8. EVALUATION PLOTS GENERATION
 
-figure('Name', 'EKF MPPT Comprehensive Validation', 'Color', [1 1 1], 'Position', [100, 100, 1000, 750]);
+figure('Name', 'EKF MPPT with DC Rheostatic Chopper (23.7 Ohm) Validation', 'Color', [1 1 1], 'Position', [100, 100, 1000, 750]);
 
 % Subplot 1: Dynamic Irradiance Injected Profile
 subplot(3, 1, 1);
@@ -328,14 +335,14 @@ ylim([0, 12]);
 % Subplot 3: PV Terminal Voltage Stability (Zero-Perturbation Settling)
 subplot(3, 1, 3);
 plot(t_out, V_pv_data, 'Color', [0 0.5 0], 'LineWidth', 1.2, 'DisplayName', 'V_{pv} Terminal');
-yline(PV.V_mp, 'r--', 'LineWidth', 1.5, 'DisplayName', 'V_{mpp} Nominal (17.5V)');
+yline(PV.V_mp, 'r--', 'LineWidth', 1.5, 'DisplayName', 'V_{mpp} Nominal (19.25V)');
 grid on;
 box on;
 xlabel('Time [seconds]', 'FontWeight', 'bold');
 ylabel('Voltage [V]', 'FontWeight', 'bold');
 title('Terminal Voltage Response (Demonstrating Zero Steady-State Perturbation)', 'FontSize', 11);
 legend('Location', 'southeast');
-ylim([12, 22]);
+ylim([12, 24]);
 
 fprintf('Validation figures generated successfully.\n');
 end
@@ -408,10 +415,10 @@ function runSimulinkLiveStreamer()
         g_eff = simG;
         t_eff = simT;
 
-        % Evaluate 10W PV System & Zero-Perturb MPPT (Literature Aligned)
-        V_oc_nom = 21.6;
-        V_mp_nom = 17.50;
-        I_sc_nom = 0.65;
+        % Evaluate 10W PV System & Zero-Perturb MPPT (CIRCUIT_AND_LOGIC_DESCRIPTION.txt Aligned)
+        V_oc_nom = 22.50;
+        V_mp_nom = 19.25;
+        I_sc_nom = 0.55;
         P_max_nom = 10.0;
 
         T_cell = t_eff + (g_eff / 800.0) * (45.0 - 20.0) * 0.1;
@@ -425,9 +432,11 @@ function runSimulinkLiveStreamer()
         i_pv = max(0.01, P_ideal / max(v_pv, 1.0));
         p_pv = v_pv * i_pv;
 
-        duty = max(0.05, min(0.95, 1 - (v_pv / 28.50)));
-        v_out = v_pv / max(1 - duty, 0.05);
-        eff = min(100.0, max(95.0, (p_pv / max(P_ideal, 0.01)) * 100.0));
+        % PWM DC Rheostatic Chopper (R = 23.7 Ohm) duty matching: R_in = R_chop / duty
+        duty = max(0.02, min(0.90, (23.7 * i_pv) / max(v_pv, 1.0)));
+        v_out = duty * v_pv; % Average voltage across 23.7 Ohm rheostat
+        % Section 7 Voltage Convergence Efficiency Metric: (1 - |V_actual - V_MPP| / V_MPP) * 100%
+        eff = min(100.0, max(0.0, (1.0 - abs(v_pv - V_mp_ref) / max(V_mp_ref, 0.5)) * 100.0));
 
         % Transmit frame to Web Dashboard
         payload = struct( ...

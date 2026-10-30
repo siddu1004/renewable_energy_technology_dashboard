@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpRight, Bell, Cable, CheckCircle2, CircleStop, CloudSun, Cpu, Gauge, HardDrive, Play, Radio, RefreshCw, ShieldCheck, SlidersHorizontal, Sun, Terminal, Usb, X, Zap } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, Bell, Cable, CheckCircle2, CircleStop, CloudSun, Cpu, Download, Gauge, HardDrive, Monitor, Play, Radio, RefreshCw, ShieldCheck, SlidersHorizontal, Sun, Terminal, Usb, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { type Frame, normalize, demoFrame } from "@/lib/telemetry";
@@ -45,6 +45,32 @@ export default function Home() {
   const [chartTab, setChartTab] = useState<"tracking" | "pv_curve" | "quality" | "all">("tracking");
   const [stopped, setStopped] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleAddToDesktop = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === "accepted") {
+        toast.success("HelioTrack added to Desktop!");
+        setDeferredPrompt(null);
+      }
+    } else {
+      toast.info(
+        "To add Desktop Icon: Click the Install icon in your browser address bar, or double-click 'add_to_desktop.bat' in the project folder.",
+        { duration: 6000 }
+      );
+    }
+  };
 
   const lastWebSerialCommitRef = useRef<number>(0);
   const lastMatlabCommitRef = useRef<number>(0);
@@ -455,7 +481,13 @@ export default function Home() {
       <section className="instrument-heading">
         <div>
           <div className="eyebrow">ARRAY A · MPPT TELEMETRY</div>
-          <h1>MPPT Dashboard</h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "4px 0" }}>
+            <img src="/icon.svg" alt="HelioTrack Logo" style={{ width: "36px", height: "36px", filter: "drop-shadow(0 0 10px rgba(114,227,210,0.35))" }} />
+            <h1 style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px" }}>
+              MPPT Dashboard
+              <span style={{ fontSize: "11px", fontWeight: 600, color: "#72e3d2", background: "rgba(114,227,210,0.12)", padding: "2px 8px", borderRadius: "6px", border: "1px solid rgba(114,227,210,0.3)", letterSpacing: "0.06em" }}>EKF PRO</span>
+            </h1>
+          </div>
           <p>Real-time telemetry, Simulink EKF model integration, and ESP32 hardware tracking.</p>
         </div>
         <div className="heading-actions">
@@ -516,6 +548,9 @@ export default function Home() {
           )}
           <button className="button subtle" onClick={connectEsp32} title="Connect ESP32 WebSocket">
             <Cable size={14} /> ESP32 WS
+          </button>
+          <button className="button subtle" onClick={handleAddToDesktop} title="Install HelioTrack Icon to Desktop">
+            <Monitor size={14} /> Add to Desktop
           </button>
           <button className="button icon" aria-label="Refresh" onClick={() => snapshotQuery.refetch()}>
             <RefreshCw size={15} />

@@ -1,0 +1,26 @@
+{
+  "name": "HelioTrack Solar MPPT Dashboard",
+  "short_name": "HelioTrack",
+  "description": "Real-time telemetry, Simulink EKF physical observer, and ESP32 hardware tracking platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#060e14",
+  "theme_color": "#0a1822",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
