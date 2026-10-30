@@ -1,9 +1,9 @@
 % =========================================================================
 % MASTER ORCHESTRATOR: EKF-BASED ZERO-PERTURBATION MPPT SYSTEM
-% Project: 10W PV System with PWM MOSFET DC Rheostatic Chopper (R = 23.7 Ohm)
+% Project: 10W PV System with PWM MOSFET DC Rheostatic Chopper (R = 23.5 Ohm)
 % Author: Systems Engineering Team
 % Description: 
-%   1. Defines PV module, DC rheostatic chopper (23.7 Ohm), and EKF state-space parameters.
+%   1. Defines PV module, DC rheostatic chopper (23.5 Ohm), and EKF state-space parameters.
 %   2. Generates a realistic synthetic irradiance profile (cloud transient).
 %   3. Injects environmental time-series into Simulink Inports.
 %   4. Executes the simulation via ode23t solver.
@@ -53,14 +53,14 @@ PV.alpha  = 0.0005;           % Current temp coefficient [A/K]
 PV.E_g    = 1.12;             % Silicon bandgap energy [eV]
 
 % --- PWM IRLZ44N MOSFET DC Rheostatic Chopper (Section 2, 3.4, 3.5 & 6) ---
-Chopper.R         = 23.7;            % Rheostatic load [Ohm] (2x47 Ohm / 25W parallel = 23.5-23.7 Ohm)
+Chopper.R         = 23.5;            % Rheostatic load [Ohm] (2x47 Ohm / 25W parallel = 23.50 Ohm)
 Chopper.C_in      = 470e-6;          % Input DC buffer capacitor [F] (Cin >= 100 uF to 470 uF)
 Chopper.f_sw      = 10e3;            % Switching frequency [Hz] (10,000 Hz / 10 kHz 12-bit PWM)
 Chopper.T_sw      = 1 / Chopper.f_sw;% Switching period [s] (0.10 ms / 100 us)
 Chopper.D_min     = 0.02;            % Minimum duty cycle clamp
 Chopper.D_max     = 0.90;            % Maximum duty cycle clamp
 Chopper.R_mpp_stc = PV.V_mp / PV.I_mp; % Optimal STC impedance: 19.25V / 0.52A = 37.02 Ohm
-Chopper.D_stc     = Chopper.R / Chopper.R_mpp_stc; % STC Duty cycle: 23.7 / 37.02 = 0.640 (64.0%)
+Chopper.D_stc     = Chopper.R / Chopper.R_mpp_stc; % STC Duty cycle: 23.5 / 37.02 = 0.640 (64.0%)
 
 % --- 2-State EKF Observer & Tustin Bilinear PI Controller (Section 5.1 & 5.3) ---
 EKF.T_sample = 50e-3;                % Closed-loop execution period (50 ms / 20 Hz)
@@ -69,9 +69,15 @@ EKF.Q        = diag([1.0e-6, 0.01]); % Process noise covariance matrix Q
 EKF.R        = diag([1.0e-5, 0.05]); % Measurement noise covariance matrix R (INA219 + DS18B20)
 EKF.P_init   = diag([1.0e-2, 1.0]);  % Initial error covariance
 EKF.x_init   = [0.55; 25.0];         % Initial state vector [I_ph (A); T_c (degC)]
-PI.Kp        = 1.20;                 % Proportional gain (e_k = V_pv - V_mp_ref)
-PI.Ki        = 0.50;                 % Integral gain (Tustin bilinear discretization)
+PI.Kp        = 1.20;                 % Proportional gain (e_k = V_pv - V_mp_ref)  [doc / 'bench' preset]
+PI.Ki        = 0.50;                 % Integral gain (Tustin bilinear discretization) [doc / 'bench' preset]
 PI.deadband  = 0.040;                % Anti-hunting deadband (+/- 40 mV)
+% The doc constants (Kp 1.2, Ki 0.5, 600-count clamp, 1 count / 50 ms slew) are tuned for the indoor-lamp
+% bench (3-5 % duty). Full-sun / cloud-transient needs ~63 % duty, so the models ship a second preset:
+%   'sun'   : Kp 100, Ki 2500, clamp 3900 counts, slew 1000 counts/tick  (default)
+%   'bench' : exact doc constants
+PI.preset    = 'sun';                % 'sun' | 'bench'  (read by the model InitFcn)
+assignin('base', 'PI_Preset', PI.preset);
 
 
 %% 2. SYNTHETIC REALISTIC PROFILE GENERATION
@@ -119,7 +125,7 @@ fprintf('  Total steps: %d | Time window: 0 to %.2f s\n\n', N_pts, T_sim);
 %% 3. MODEL CONFIGURATION & EXECUTION
 
 mdl = '';
-candidates = {'Zero_Perturb_MPPT_Chopper', 'Zero_Perturb_MPPT_Build', 'Zero_Perturb_MPPT_Live', 'Master_EKF_MPPT_System'};
+candidates = {'Zero_Perturb_MPPT_Build', 'Zero_Perturb_MPPT_Live', 'Master_EKF_MPPT_System'};
 try
     curr = bdroot(gcs);
     if ~isempty(curr) && ~strcmp(get_param(curr, 'BlockDiagramType'), 'library') && ~strcmp(curr, 'nesl_utility')
@@ -144,12 +150,13 @@ if ~bdIsLoaded(mdl)
 end
 
 fprintf('Targeting Simulink model: %s\n', mdl);
-fprintf('Configuring solver parameters (ode23t, MaxStep = 1e-5 s)...\n');
+fprintf('Configuring solver parameters (ode23t, MaxStep = 2e-6 s for 10 kHz PWM)...\n');
 
 % Set model solver parameters for power electronic switching transients
+% (100 us PWM period -> MaxStep 2 us gives 50 solver steps per switching cycle)
 set_param(mdl, 'StopTime', num2str(T_sim));
 set_param(mdl, 'Solver', 'ode23t');
-set_param(mdl, 'MaxStep', '1e-5');
+set_param(mdl, 'MaxStep', '2e-6');
 set_param(mdl, 'RelTol', '1e-3');
 
 % Suppress scope auto-opening during execution
@@ -184,36 +191,49 @@ fprintf('Simulation completed in %.2f seconds.\n\n', sim_time);
 
 %% 4. TELEMETRY EXTRACTION & POST-PROCESSING
 
-% Extract logged signals from workspace or simulation output structure
+% Extract the model's root outports (logged as simOut.yout, in port order):
+%   1 Gate_Signal | 2 V_mp_ref | 3 I_ph_est | 4 T_c_est | 5 I_pv_out | 6 T_cell_out | 7 P_pv_out
+real_signals = false;
 try
-    t_out = simOut.tout;
-    % Fallback extraction based on standard scope logs / out blocks
-    if isprop(simOut, 'logsout') && ~isempty(simOut.logsout)
-        logs = simOut.logsout;
-        V_pv_data  = logs.get('V_pv').Values.Data;
-        I_pv_data  = logs.get('I_pv').Values.Data;
-        P_pv_data  = V_pv_data .* I_pv_data;
-    else
-        % Query standard exported scope variables from base workspace
-        V_pv_data = evalin('base', 'V_pv_meas');
-        I_pv_data = evalin('base', 'I_pv_meas');
-        P_pv_data = V_pv_data .* I_pv_data;
-    end
+    y = simOut.yout;
+    P_ts = y{7}.Values;  I_ts = y{5}.Values;  Tc_ts = y{6}.Values;
+    t_out     = P_ts.Time(:);
+    P_pv_data = double(P_ts.Data(:));
+    I_pv_data = double(I_ts.Data(:));
+    V_pv_data = P_pv_data ./ max(I_pv_data, 1e-6);                 % V_pv = P_pv / I_pv
+    Tc_data   = interp1(Tc_ts.Time(:), double(Tc_ts.Data(:)), t_out);
+    real_signals = true;
 catch
-    warning('Direct log lookup adjusted. Reconstructing signals from scope buffers.');
-    % Synthesize aligned benchmark trajectories if direct signal tapping varies
+    warning('Model outputs not found in simOut.yout - falling back to a SYNTHETIC reconstruction (NOT a measurement).');
     t_out = t_vec;
-    % Analytical ideal peak calculation under the exact profile
-    P_mpp_ideal = (G_profile / 1000.0) * PV.P_max .* (1 - 0.004 * (T_profile - 25));
-    % EKF observer response with transient tracking dynamics
-    P_pv_data = P_mpp_ideal .* (1 - 0.02 * exp(-t_out/0.05)) + 0.04 * randn(size(t_out));
+    P_mpp_syn = (G_profile / 1000.0) * PV.P_max .* (1 - 0.004 * (T_profile - 25));
+    P_pv_data = P_mpp_syn .* (1 - 0.02 * exp(-t_out/0.05)) + 0.04 * randn(size(t_out));
     V_pv_data = PV.V_mp * ones(size(t_out)) + 0.1 * randn(size(t_out));
     I_pv_data = P_pv_data ./ V_pv_data;
+    Tc_data   = T_profile;
 end
 
-% Compute Analytical Ideal Maximum Power (Benchmark Reference Curve)
-P_mpp_ideal = (interp1(t_vec, G_profile, t_out) / PV.G_ref) * PV.P_max .* ...
-              (1 - 0.0045 * (interp1(t_vec, T_profile, t_out) - 25.0));
+% Irradiance seen by the plant: the injected profile (Build) or the slider constant (Live, no Inports)
+if ~isempty(inports)
+    G_used = interp1(t_vec, G_profile, t_out);
+else
+    G_used = str2double(get_param([mdl '/Live_G_irr'], 'Value')) * ones(size(t_out));
+end
+
+% Ideal Maximum Power: exact single-diode (Lambert-W) MPP of the same PV equations the model uses,
+% evaluated on a coarse time grid and interpolated (replaces the old linear G/1000 * 10 W approximation).
+P_mpp_ideal = zeros(size(t_out));  V_mpp_ideal = zeros(size(t_out));
+if real_signals
+    gi = unique(round(linspace(1, numel(t_out), 400)));
+    for j = gi
+        [P_mpp_ideal(j), V_mpp_ideal(j)] = mpp_exact(G_used(j), Tc_data(j));
+    end
+    P_mpp_ideal = interp1(t_out(gi), P_mpp_ideal(gi), t_out);
+    V_mpp_ideal = interp1(t_out(gi), V_mpp_ideal(gi), t_out);
+else
+    P_mpp_ideal = (G_used / PV.G_ref) * PV.P_max .* (1 - 0.0045 * (Tc_data - 25.0));
+    V_mpp_ideal = PV.V_mp * ones(size(t_out));
+end
 
 % Ensure arrays are column vectors
 P_pv_data   = P_pv_data(:);
@@ -226,7 +246,7 @@ t_out       = t_out(:);
 energy_extracted = trapz(t_out, P_pv_data);
 energy_available = trapz(t_out, P_mpp_ideal);
 tracking_efficiency = (energy_extracted / energy_available) * 100.0;
-voltage_convergence_eff = mean(max(0.0, (1.0 - abs(V_pv_data - PV.V_mp) ./ PV.V_mp) * 100.0));
+voltage_convergence_eff = mean(max(0.0, (1.0 - abs(V_pv_data - V_mpp_ideal) ./ V_mpp_ideal) * 100.0));
 
 fprintf('=======================================================\n');
 fprintf('             MPPT PERFORMANCE METRICS                  \n');
@@ -278,7 +298,7 @@ try
         p = double(P_ekf_down(idx));
         i = max(0.01, p / max(v, 1.0));
         g = double(G_down(idx));
-        % PWM DC Rheostatic Chopper impedance matching (R = 23.7 Ohm)
+        % PWM DC Rheostatic Chopper impedance matching (R = 23.5 Ohm)
         d = max(Chopper.D_min, min(Chopper.D_max, (Chopper.R * i) / max(v, 1.0)));
         v_rheo = d * v; % Average switched voltage across rheostatic load
         
@@ -309,7 +329,7 @@ end
 
 %% 8. EVALUATION PLOTS GENERATION
 
-figure('Name', 'EKF MPPT with DC Rheostatic Chopper (23.7 Ohm) Validation', 'Color', [1 1 1], 'Position', [100, 100, 1000, 750]);
+figure('Name', 'EKF MPPT with DC Rheostatic Chopper (23.5 Ohm) Validation', 'Color', [1 1 1], 'Position', [100, 100, 1000, 750]);
 
 % Subplot 1: Dynamic Irradiance Injected Profile
 subplot(3, 1, 1);
@@ -432,9 +452,9 @@ function runSimulinkLiveStreamer()
         i_pv = max(0.01, P_ideal / max(v_pv, 1.0));
         p_pv = v_pv * i_pv;
 
-        % PWM DC Rheostatic Chopper (R = 23.7 Ohm) duty matching: R_in = R_chop / duty
-        duty = max(0.02, min(0.90, (23.7 * i_pv) / max(v_pv, 1.0)));
-        v_out = duty * v_pv; % Average voltage across 23.7 Ohm rheostat
+        % PWM DC Rheostatic Chopper (R = 23.5 Ohm) duty matching: R_in = R_chop / duty
+        duty = max(0.02, min(0.90, (23.5 * i_pv) / max(v_pv, 1.0)));
+        v_out = duty * v_pv; % Average voltage across 23.5 Ohm rheostat
         % Section 7 Voltage Convergence Efficiency Metric: (1 - |V_actual - V_MPP| / V_MPP) * 100%
         eff = min(100.0, max(0.0, (1.0 - abs(v_pv - V_mp_ref) / max(V_mp_ref, 0.5)) * 100.0));
 
@@ -472,4 +492,28 @@ end
 function cleanupSession()
     setappdata(0, 'MPPT_LIVE_STREAM_RUNNING', false);
     fprintf('\n[OK] Live streaming halted cleanly.\n');
+end
+
+function [Pm, Vm] = mpp_exact(G, Tc)
+    % Exact MPP of the single-diode model (Lambert-W I-V) with the doc's parameters:
+    % Ns=36, n=1.25, Rs=0.25, Rsh=500, Isc=0.55 A, I0(STC) fitted so Voc=22.5 V.
+    k = 1.380649e-23; q = 1.60217663e-19; Eg = 1.12; T0 = 298.15;
+    Ns = 36; n = 1.25; Rs = 0.25; Rsh = 500;
+    Tk  = Tc + 273.15;
+    I0  = 1.7846e-9 * (Tk / T0)^3 * exp(q * Eg / (n * k) * (1 / T0 - 1 / Tk));
+    a   = Ns * n * k * Tk / q;
+    Iph = G / 1000 * (0.55 + 0.000325 * (Tc - 25));
+    V   = linspace(0.5, 22.6, 600);
+    arg = (Rs * I0 * Rsh / ((Rsh + Rs) * a)) .* exp(Rsh * (Rs * (Iph + I0) + V) / ((Rsh + Rs) * a));
+    w = zeros(size(arg));
+    sm = arg < 1;
+    w(sm) = arg(sm) .* (1 - arg(sm) + 1.5 * arg(sm).^2);
+    l = log(arg(~sm)); w(~sm) = l - log(max(l, 1e-9));
+    for it = 1:8
+        ew = exp(w); f = w .* ew - arg;
+        w = w - f ./ max(ew .* (w + 1) - (w + 2) .* f ./ (2 * w + 2), 1e-300);
+    end
+    I = max((Rsh * (Iph + I0) - V) / (Rsh + Rs) - (a / Rs) .* w, 0);
+    [Pm, ix] = max(V .* I);
+    Vm = V(ix);
 end
