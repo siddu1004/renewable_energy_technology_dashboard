@@ -1,0 +1,1 @@
+Models exported to R2025a format (open in R2025a and R2025b). Needs Simulink, Simscape Electrical, Stateflow. Run: open_system('Zero_Perturb_MPPT_Build'); master_orchestrator. Verified only in R2026a (same blocks, same results); not opened in a real 2025 install.
