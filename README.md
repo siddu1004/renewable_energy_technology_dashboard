@@ -3,7 +3,7 @@
 Comprehensive full-stack engineering platform combining:
 1. Physical Solar PV & 10 kHz DC Rheostatic Chopper Simulation in MATLAB/Simulink.
 2. 2-State Extended Kalman Filter (EKF) Observer, Analytical Lambert-W Solver, and Tustin PI Regulator.
-3. React 18, Vite, TypeScript, tRPC, Express, WebSockets, and SQLite Real-Time Web Dashboard.
+3. React, Vite, TypeScript, tRPC, Express, WebSockets, and SQLite Real-Time Web Dashboard.
 4. ESP32 Dual-Core FreeRTOS Firmware with Native In-Browser WebSerial USB Telemetry.
 
 Repository: https://github.com/siddardhvanguri-source/renewable_energy_technology_dashboard.git
@@ -12,81 +12,101 @@ Repository: https://github.com/siddardhvanguri-source/renewable_energy_technolog
 TABLE OF CONTENTS
 ================================================================================
 1. System Prerequisites
-2. Step 1: Git Clone and IDE Setup (VS Code / Antigravity)
-3. Step 2: Web Dashboard Setup and Execution
-4. Step 3: MATLAB and Simulink Simulation Execution
-5. Step 4: Connecting Simulink Live Stream to the Web Dashboard
-6. Step 5: ESP32 Hardware Firmware Setup and WebSerial Connection
-7. Repository File and Directory Structure
-8. Troubleshooting and FAQ
+2. Option A: Installing from the ZIP File (Fastest Setup)
+3. Option B: Installing via Git Clone (VS Code / Antigravity)
+4. Adding the 1-Click Smart Desktop Icon
+5. Running the MATLAB & Simulink Simulations (R2025a, R2025b, R2026a+)
+6. Connecting Simulink Live Stream to the Web Dashboard
+7. Connecting ESP32 Hardware via USB WebSerial
+8. Repository Directory Structure
+9. Troubleshooting and FAQ
 
 ================================================================================
 1. SYSTEM PREREQUISITES
 ================================================================================
 Before starting, ensure you have the following installed on your computer:
-- Git: https://git-scm.com/
 - Node.js (version 18.0.0 or higher): https://nodejs.org/
 - MATLAB (version R2022b, R2023a/b, R2024a/b, R2025a, R2025b, or R2026a)
   Required Toolboxes: Simulink, Simscape, Simscape Electrical
-- Optional for Hardware: Arduino IDE (v2.0+) or VS Code PlatformIO extension (for ESP32 flashing)
+- Optional for Git Clone: Git (https://git-scm.com/)
+- Optional for Hardware: Arduino IDE (v2.0+) for ESP32 flashing
 
 ================================================================================
-2. STEP 1: GIT CLONE AND IDE SETUP (VS CODE / ANTIGRAVITY)
+2. OPTION A: INSTALLING FROM THE ZIP FILE (FASTEST SETUP)
 ================================================================================
 
-Open PowerShell, Command Prompt, or Terminal on your computer:
+Step 1: Extract the ZIP File
+Right-click `renewable_energy_technology_dashboard_CLEAN.zip` and select "Extract All..." to any folder on your computer (for example, `C:\Projects\renewable_energy_technology_dashboard`).
+
+Step 2: Open the Extracted Folder in Terminal or VS Code / Antigravity
+Open PowerShell or Command Prompt and navigate into the extracted project folder:
 
 ```bash
-git clone https://github.com/siddardhvanguri-source/renewable_energy_technology_dashboard.git
-cd renewable_energy_technology_dashboard
+cd "C:\Path\To\renewable_energy_technology_dashboard"
 ```
 
-To open in Visual Studio Code:
-```bash
-code .
-```
+(Or open the extracted folder directly inside VS Code or Antigravity IDE and open the integrated terminal with `Ctrl + ~`).
 
-To open in Antigravity IDE:
-Open Antigravity IDE, select "Open Folder", and choose the cloned folder:
-`renewable_energy_technology_dashboard`
-
-================================================================================
-3. STEP 2: WEB DASHBOARD SETUP AND EXECUTION
-================================================================================
-
-In the terminal inside your cloned repository folder, run:
-
-1. Install project dependencies (only required the first time):
+Step 3: Install Dependencies (Only required once)
 ```bash
 npm install
 ```
 
-2. Start the development server:
+Step 4: Start the Web Dashboard Server
 ```bash
 npm run dev
 ```
 
-3. When you see:
+When you see:
 ```text
 Server running on http://localhost:3000/
 ```
-Open Google Chrome or Microsoft Edge and navigate to:
+Open Google Chrome or Microsoft Edge and go to:
 http://localhost:3000
 
-The web dashboard is now running and ready to receive real-time data from either Simulink or ESP32 hardware.
+(Alternative 1-Click Start: You can also simply double-click `launch_dashboard.bat` inside the extracted folder. It automatically runs `npm install` if needed, starts the background server on port 3000, and opens `http://localhost:3000` in your browser).
 
 ================================================================================
-4. STEP 3: MATLAB AND SIMULINK SIMULATION EXECUTION
+3. OPTION B: INSTALLING VIA GIT CLONE (VS CODE / ANTIGRAVITY)
 ================================================================================
 
-Open MATLAB and navigate into the `matlab` folder inside your cloned repository:
+Open PowerShell, Command Prompt, or Terminal:
+
+```bash
+git clone https://github.com/siddardhvanguri-source/renewable_energy_technology_dashboard.git
+cd renewable_energy_technology_dashboard
+npm install
+npm run dev
+```
+
+Then open http://localhost:3000 in Google Chrome or Microsoft Edge.
+
+================================================================================
+4. ADDING THE 1-CLICK SMART DESKTOP ICON
+================================================================================
+
+To add the custom **HelioTrack MPPT Dashboard** icon to your Windows Desktop:
+1. Open the project folder in Windows File Explorer.
+2. Double-click `add_to_desktop.bat`.
+3. A shortcut named **HelioTrack MPPT Dashboard** with the custom HelioTrack solar icon will appear on your Desktop.
+4. Anytime you double-click this Desktop icon, it automatically checks if port 3000 is running, starts the Node.js server in the background if it is down, and opens `http://localhost:3000` in your browser.
+
+================================================================================
+5. RUNNING THE MATLAB AND SIMULINK SIMULATIONS
+================================================================================
+
+Open MATLAB and navigate into the `matlab` folder inside your extracted project folder:
 
 ```matlab
-cd("c:\Your\Path\To\renewable_energy_technology_dashboard\matlab");
+cd("C:\Path\To\renewable_energy_technology_dashboard\matlab");
 addpath(pwd);
 ```
 
-You now have 3 simulation modes available:
+Note for MATLAB R2025a and R2025b users:
+Pre-exported native models for R2025a and R2025b are also available in:
+`HELIOTRACK_MPPT_SIMULATION_PACKAGE\Version_Specific_Models\`
+
+You have 3 simulation modes available:
 
 --------------------------------------------------------------------------------
 MODE A: Automated Batch MPPT Simulation (1-Click Run)
@@ -137,36 +157,31 @@ What happens:
 - Exports numerical data to `mppt_benchmark_comparison_data.csv`.
 
 ================================================================================
-5. STEP 4: CONNECTING SIMULINK LIVE STREAM TO THE WEB DASHBOARD
+6. CONNECTING SIMULINK LIVE STREAM TO THE WEB DASHBOARD
 ================================================================================
 
 To see Simulink slider movements reflected live on the web dashboard:
 
-1. Make sure the dashboard server is running in terminal:
-```bash
-npm run dev
-```
-
-2. In MATLAB, navigate to `matlab/` and run:
+1. Ensure the dashboard server is running (`npm run dev` or via the Desktop icon).
+2. In MATLAB, inside the `matlab` folder, run:
 ```matlab
 master_orchestrator('live')
 ```
-(On Windows, you can alternatively double-click `matlab/run_live.bat`).
+(On Windows, you can alternatively double-click `matlab\run_live.bat`).
 
 3. Open your browser to http://localhost:3000.
-4. At the top of the dashboard, click the "MATLAB" or "DUAL" button in the source selector.
+4. At the top of the dashboard, click the "MATLAB" or "DUAL (BOTH)" button in the source selector.
 5. In Simulink, drag the Irradiance or Temperature sliders.
 6. The web dashboard digital meters, power gauges, dynamic P-V curves, and ripple monitors update live at 15 Hz.
-7. Press Ctrl+C in MATLAB Command Window to stop streaming.
+7. Press Ctrl+C in the MATLAB Command Window to stop streaming.
 
 ================================================================================
-6. STEP 5: ESP32 HARDWARE FIRMWARE SETUP AND WEBSERIAL CONNECTION
+7. CONNECTING ESP32 HARDWARE VIA USB WEBSERIAL
 ================================================================================
 
 If you are connecting physical ESP32 hardware:
 
 1. Firmware Location:
-   The source code is located at:
    `esp32/esp32_mppt_firmware/esp32_mppt_firmware.ino`
 
 2. Required Arduino Libraries:
@@ -176,24 +191,25 @@ If you are connecting physical ESP32 hardware:
 
 3. Uploading to ESP32:
    - Open `esp32/esp32_mppt_firmware/esp32_mppt_firmware.ino` in Arduino IDE.
-   - Select Board: "ESP32 Dev Module".
-   - Select your COM Port and click "Upload".
+   - Select Board: "ESP32 Dev Module", select your COM Port, and click "Upload".
 
-4. Connecting to the Web Dashboard (No software install required):
-   - Connect the ESP32 to your PC via USB cable.
+4. Connecting to the Web Dashboard:
+   - Plug the ESP32 into your PC via USB cable.
    - Open http://localhost:3000 in Google Chrome or Microsoft Edge.
-   - Click the green "Connect ESP32 via USB Serial" button on the dashboard.
+   - Click the "Connect ESP32 (USB)" button at the top right of the dashboard.
    - Select your ESP32 COM port and click "Connect".
-   - The dashboard reads raw high-speed telemetry directly via native WebSerial at 115200 baud.
+   - Live telemetry streams directly into the dashboard at 115200 baud.
 
 ================================================================================
-7. REPOSITORY DIRECTORY STRUCTURE
+8. REPOSITORY DIRECTORY STRUCTURE
 ================================================================================
 
 ```text
 renewable_energy_technology_dashboard/
-├── client/                     # React 18 frontend (Vite, TypeScript, Tailwind)
-│   ├── public/                 # Static assets, SVG brand icon & favicons
+├── add_to_desktop.bat          # 1-click installer for Smart Desktop Shortcut
+├── launch_dashboard.bat        # 1-click server auto-starter & browser launcher
+├── client/                     # React frontend (Vite, TypeScript, Tailwind)
+│   ├── public/                 # Static assets, HelioTrack icons & favicons
 │   ├── src/
 │   │   ├── pages/Home.tsx      # Main real-time telemetry dashboard interface
 │   │   ├── components/         # Engineering charts, digital dials, liquid cards
@@ -216,17 +232,17 @@ renewable_energy_technology_dashboard/
 ```
 
 ================================================================================
-8. TROUBLESHOOTING AND FAQ
+9. TROUBLESHOOTING AND FAQ
 ================================================================================
 
 1. Problem: "npm error: Cannot find module"
-   Solution: Ensure you are in the root directory containing `package.json` before running `npm install`.
+   Solution: Ensure you are in the root folder containing `package.json` and run `npm install`.
 
 2. Problem: "Port 3000 is busy"
-   Solution: The server will automatically pick the next available port (e.g. 3001) and print it in the console.
+   Solution: The server automatically picks the next available port (e.g. 3001) and prints it in the terminal.
 
-3. Problem: "Simulink model error: Version mismatch" in MATLAB R2025a or R2025b
-   Solution: Open `HELIOTRACK_MPPT_SIMULATION_PACKAGE/Version_Specific_Models` which has files exported explicitly for R2025a and R2025b.
+3. Problem: "Simulink model error: Created in a newer version of Simulink"
+   Solution: Open `HELIOTRACK_MPPT_SIMULATION_PACKAGE/Version_Specific_Models` and open the `_R2025a.slx` or `_R2025b.slx` model matching your MATLAB release.
 
 4. Problem: "WebSerial button says 'Not Supported'"
-   Solution: WebSerial is supported natively in Google Chrome, Microsoft Edge, and Opera. Firefox does not support WebSerial.
+   Solution: Use Google Chrome or Microsoft Edge.

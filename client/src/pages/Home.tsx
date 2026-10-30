@@ -504,9 +504,9 @@ export default function Home() {
                   color: sourcePreference === mode ? "#72e3d2" : "#98afba",
                   border: sourcePreference === mode ? "1px solid rgba(114,227,210,0.4)" : "1px solid transparent",
                   fontWeight: sourcePreference === mode ? "bold" : "normal",
-                  transition: "all 0.2s ease",
+                  transition: "transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms ease, border-color 160ms ease, color 160ms ease",
                 }}
-                onClick={() => setSourcePreference(mode)}
+                aria-pressed={sourcePreference === mode} onClick={() => setSourcePreference(mode)}
               >
                 {mode === "DUAL" ? "DUAL (BOTH)" : mode}
               </button>
@@ -790,27 +790,27 @@ export default function Home() {
           <div className="section-label" style={{ margin: 0 }}>
             {sourcePreference === "DUAL" ? "DUAL TELEMETRY COMPARISON & WAVEFORMS" : "REAL-TIME MPPT TELEMETRY & ANALYSIS"} <i />
           </div>
-          <div className="chart-tab-list">
+          <div className="chart-tab-list" role="tablist" aria-label="Telemetry chart views">
             <button
-              className={`chart-tab-btn ${chartTab === "tracking" ? "active" : ""}`}
+              role="tab" aria-selected={chartTab === "tracking"} className={`chart-tab-btn ${chartTab === "tracking" ? "active" : ""}`}
               onClick={() => setChartTab("tracking")}
             >
               <Activity size={13} /> Comparative Tracking
             </button>
             <button
-              className={`chart-tab-btn ${chartTab === "pv_curve" ? "active" : ""}`}
+              role="tab" aria-selected={chartTab === "pv_curve"} className={`chart-tab-btn ${chartTab === "pv_curve" ? "active" : ""}`}
               onClick={() => setChartTab("pv_curve")}
             >
               <Zap size={13} /> P-V Characteristic
             </button>
             <button
-              className={`chart-tab-btn ${chartTab === "quality" ? "active" : ""}`}
+              role="tab" aria-selected={chartTab === "quality"} className={`chart-tab-btn ${chartTab === "quality" ? "active" : ""}`}
               onClick={() => setChartTab("quality")}
             >
               <Gauge size={13} /> Quality & Efficiency
             </button>
             <button
-              className={`chart-tab-btn ${chartTab === "all" ? "active" : ""}`}
+              role="tab" aria-selected={chartTab === "all"} className={`chart-tab-btn ${chartTab === "all" ? "active" : ""}`}
               onClick={() => setChartTab("all")}
             >
               <SlidersHorizontal size={13} /> All Charts

@@ -1120,3 +1120,125 @@ body {
 }
 
 
+
+/* ==========================================================================
+   SFP 14-SKILL HIGH-CRAFT UI POLISH LAYER
+   Bundles: Ship a page · Polish motion · Critique a UI · Accessible form · 3D & Shader / Liquid Glass
+   ========================================================================== */
+
+/* 1. Liquid Glass Specular Refraction & Tactile Surface Depth (liquid-glass-js, shadergradient, design-taste-frontend) */
+.liquid-glass {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(157, 190, 235, 0.28);
+  background: linear-gradient(155deg, rgba(16, 40, 64, 0.92) 0%, rgba(8, 22, 38, 0.88) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 18px 46px rgba(1, 10, 22, 0.52),
+    0 0 28px rgba(82, 125, 235, 0.11);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.liquid-glass-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    80% 50% at 50% 0%,
+    rgba(114, 227, 210, 0.07) 0%,
+    rgba(157, 190, 235, 0.02) 45%,
+    transparent 100%
+  );
+  z-index: 0;
+}
+
+.liquid-glass > *:not(.liquid-glass-shine) {
+  position: relative;
+  z-index: 1;
+}
+
+/* 2. Tabular Numerals & Anti-Jitter Telemetry Readouts (impeccable, break-ui) */
+.tabular-nums,
+.hero-readout > strong,
+.telemetry-chip strong,
+.dual-main-power strong,
+.dual-mini-metric strong,
+.delta-stat-item strong,
+.live-status-item strong,
+.gauge-wrap strong,
+.efficiency-ring strong,
+.smooth-value-transition {
+  font-variant-numeric: tabular-nums !important;
+  font-feature-settings: "tnum" 1, "zero" 1 !important;
+}
+
+/* 3. Explicit Hardware-Accelerated Motion & Tactile Press Feedback (animate, review-animations, animation-performance) */
+.button,
+.sampling-pill-btn,
+.chart-tab-btn,
+.stop-button,
+.rail-link,
+.floating-events {
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    color 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+.button:active,
+.sampling-pill-btn:active,
+.chart-tab-btn:active,
+.stop-button:active,
+.floating-events:active {
+  transform: scale(0.97) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .telemetry-chip:hover {
+    transform: translateY(-2px);
+    border-color: rgba(114, 227, 210, 0.45);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 20px 44px rgba(1, 10, 22, 0.58),
+      0 0 28px rgba(114, 227, 210, 0.14);
+  }
+  .dual-source-card:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* 4. WCAG 2.2 AA Focus-Visible Rings & Contrast Hardening (accessibility-audit, frontend-a11y) */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[role="tab"]:focus-visible {
+  outline: 2px solid #72e3d2 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px rgba(114, 227, 210, 0.22) !important;
+}
+
+/* Status Pill Variants for ESP32 USB & Dual Stream */
+.status-pill.esp32-usb-live,
+.status-pill.dual-stream-live {
+  color: #72e3d2;
+  border-color: rgba(114, 227, 210, 0.45);
+  background: rgba(114, 227, 210, 0.12);
+  box-shadow: 0 0 14px rgba(114, 227, 210, 0.2);
+}
+
+/* Break-UI Overflow Hardening */
+.notice-bar #display-notice {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

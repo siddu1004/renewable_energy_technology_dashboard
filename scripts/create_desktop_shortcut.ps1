@@ -1,5 +1,5 @@
 $desktop = [Environment]::GetFolderPath("Desktop")
-$projectRoot = "c:\Users\saisi\.antigravity-ide\renewable_energy_technology_dashboard"
+$projectRoot = Split-Path -Parent $PSScriptRoot
 $launcherBat = Join-Path $projectRoot "launch_dashboard.bat"
 $icoPath = Join-Path $projectRoot "client\public\icon.ico"
 $shortcutPath = Join-Path $desktop "HelioTrack MPPT Dashboard.lnk"
@@ -18,7 +18,7 @@ $shortcut.WindowStyle = 7 # Minimized execution for clean launcher experience
 $shortcut.Description = "Start HelioTrack Server & Open Real-Time MPPT Dashboard"
 $shortcut.Save()
 
-Write-Host "Smart Desktop shortcut updated successfully:"
+Write-Host "Smart Desktop shortcut installed successfully:"
 Write-Host "  -> Target: $launcherBat"
 Write-Host "  -> Icon:   $icoPath"
 Write-Host "  -> Link:   $shortcutPath"

@@ -1,5 +1,11 @@
-$projectRoot = "c:\Users\saisi\.antigravity-ide\renewable_energy_technology_dashboard"
+$projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
+
+# Auto-install dependencies if node_modules does not exist yet (e.g. fresh ZIP extraction)
+if (-not (Test-Path (Join-Path $projectRoot "node_modules"))) {
+    Write-Host "First-time setup detected: Installing npm packages (this takes ~1 minute)..." -ForegroundColor Yellow
+    Start-Process -FilePath "npm.cmd" -ArgumentList "install" -WorkingDirectory $projectRoot -Wait -NoNewWindow
+}
 
 Write-Host "Checking HelioTrack Dashboard server on port 3000..." -ForegroundColor Cyan
 
