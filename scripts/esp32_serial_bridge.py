@@ -62,6 +62,37 @@ def main():
                     payload = json.loads(line)
                 except Exception as json_err:
                     print(f"JSON decode warning: {json_err}")
+            elif "Actual Voltage:" in line or "V_MPP" in line:
+                import re
+                try:
+                    v_match = re.search(r"Actual Voltage:\s*([0-9.]+)", line)
+                    vmp_match = re.search(r"V_MPP \(Target\):\s*([0-9.]+)", line)
+                    p_match = re.search(r"Power:\s*([0-9.]+)\s*mW", line)
+                    i_match = re.search(r"Current:\s*([0-9.]+)\s*mA", line)
+                    d_match = re.search(r"PWM12:\s*([0-9]+)/4095", line)
+                    t_match = re.search(r"Temp:\s*([0-9.]+)", line)
+                    w0_match = re.search(r"W0_Exec:\s*([0-9]+)", line)
+
+                    if v_match:
+                        v = float(v_match.group(1))
+                        i = float(i_match.group(1)) / 1000.0 if i_match else 0.0
+                        p = float(p_match.group(1)) / 1000.0 if p_match else v * i
+                        v_mp = float(vmp_match.group(1)) if vmp_match else 19.25
+                        d_counts = int(d_match.group(1)) if d_match else 180
+                        duty = d_counts / 4095.0
+                        t = float(t_match.group(1)) if t_match else 25.0
+                        payload = {
+                            "v_pv": v,
+                            "i_pv": i,
+                            "p_pv": p,
+                            "v_mp": v_mp,
+                            "duty": duty,
+                            "temperature": t,
+                            "source": "ESP32",
+                            "timestampMs": int(time.time() * 1000)
+                        }
+                except Exception as regex_err:
+                    pass
             elif "V_op:" in line:
                 import re
                 try:
